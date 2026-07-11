@@ -1,0 +1,28 @@
+[Unit]
+Description=Followthrough durable Hermes Kanban orchestrator
+After=network-online.target followthrough.service hermes-gateway.service
+Wants=network-online.target hermes-gateway.service
+Requires=followthrough.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alhinai/Projects/followthrough
+EnvironmentFile=-/home/alhinai/Projects/followthrough/.env
+Environment=PATH=/home/alhinai/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/alhinai/Projects/followthrough/.venv/bin/python /home/alhinai/Projects/followthrough/scripts/followthrough-orchestrator.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/alhinai/Projects/followthrough/data /home/alhinai/.hermes/kanban /home/alhinai/.cache
+# Calendar refresh is the only Hermes credential mutation permitted here.
+ReadWritePaths=/home/alhinai/.hermes/user/google-workspace/google_token.json
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target

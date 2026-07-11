@@ -1,7 +1,66 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Followthrough · Ambient BizDev</title><link rel="stylesheet" href="/static/styles.css"></head><body>
-<header><div class="brand"><span class="dot"></span><div><strong>Followthrough</strong><small>ambient BizDev agency</small></div></div><div id="consent" class="pill"><span class="pulse"></span> listening off</div></header>
-<main><section class="hero"><div><p class="eyebrow">powered by Hermes · consent-first</p><h1>Conversations become<br><em>follow-through.</em></h1><p class="lede">A quiet agent crew hears the signal, researches it, remembers the relationship, and prepares the next move before it disappears.</p><div class="controls"><button id="listen" class="primary">Start a consented session</button><button id="sample" class="secondary">Run live sample</button></div><p class="privacy">Nothing is captured until you turn listening on. Noise is discarded before persistence. External sends stay approval-gated.</p></div><div class="orb"><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><span>F</span></div></section>
-<section class="capture"><div class="section-head"><div><p class="eyebrow">signal capture</p><h2>Say what happened.</h2></div><span>browser mic · consent required</span></div><textarea id="input" placeholder="I met Maya from Acme. She wants to automate support with Hermes. Research Acme and draft a Tuesday follow-up."></textarea><button id="submit" class="primary full">Send signal to the crew <span>→</span></button></section>
-<section class="grid"><div class="panel"><div class="section-head"><div><p class="eyebrow">live operations</p><h2>Agent trace</h2></div><span class="live">● LIVE</span></div><div id="runs" class="runs"><div class="empty">Waiting for a signal…</div></div></div><div class="panel metrics"><div class="section-head"><div><p class="eyebrow">proof surface</p><h2>System proof</h2></div></div><div class="metric-grid"><div><b id="mTotal">0</b><span>signals received</span></div><div><b id="mDone">0</b><span>completed runs</span></div><div><b id="mDiscarded">0</b><span>noise discarded</span></div><div><b id="mLatency">—</b><span>avg latency</span></div></div><div id="integrations" class="integrations"></div></div></section>
-<section class="management"><div class="section-head"><div><p class="eyebrow">management surface</p><h2>Teach the crew a role.</h2></div><span>non-engineer control</span></div><div class="role-form"><input id="roleName" placeholder="Role name"><input id="roleJob" placeholder="Job it owns"><input id="roleTools" placeholder="Tools, comma separated"><button id="addRole" class="secondary">Add role</button></div><div id="roles" class="roles"></div></section>
-<section class="signup"><div><p class="eyebrow">event pass</p><h2>Keep your pipeline alive after today.</h2><p>One free follow-through. Upgrade for ten researched actions and a living relationship memory.</p></div><div><input id="email" type="email" placeholder="you@company.com"><button id="signup" class="primary">Start free</button></div></section></main><footer><span>Followthrough · fresh Hermes Buildathon build</span><span>Cloudflare origin · safe by default</span></footer><script src="/static/app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Followthrough · Ambient Operator</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span><div><strong>Followthrough</strong><small>ambient operator on Spark</small></div></div>
+  <div id="systemState" class="pill"><span class="pulse"></span> checking stack</div>
+</header>
+<main>
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Omi → encrypted Spark archive → Hermes</p>
+      <h1>Always listening.<br><em>Quietly acting.</em></h1>
+      <p class="lede">Your phone captures continuously. Spark preserves the complete private archive, promotes only relevant speech from your authenticated ambient device, and shows every research run, sandbox receipt, and typed action as it happens.</p>
+      <div class="controls">
+        <button id="pauseActions" class="secondary">Pause actions</button>
+        <button id="resumeActions" class="primary">Resume</button>
+        <button id="killAll" class="danger">Emergency stop</button>
+      </div>
+      <p class="privacy">Original audio and transcripts stay encrypted. Irrelevant life conversation never enters Hermes memory or an action queue.</p>
+    </div>
+    <div class="orb"><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><span>●</span><small id="modeLabel">LIVE</small></div>
+  </section>
+
+  <section class="flow panel-wide">
+    <div><b>1</b><span>Phone mic</span><small>Omi / device</small></div>
+    <i>→</i><div><b>2</b><span>Private archive</span><small>AES-256-GCM</small></div>
+    <i>→</i><div><b>3</b><span>Relevance gate</span><small>trusted device + intent</small></div>
+    <i>→</i><div><b>4</b><span>Hermes</span><small>least authority</small></div>
+    <i>→</i><div><b>5</b><span>Typed action</span><small>receipt + rollback</small></div>
+  </section>
+
+  <section class="capture">
+    <div class="section-head"><div><p class="eyebrow">live demo input</p><h2>Inject a controlled signal.</h2></div><span>phone remains the primary sensor</span></div>
+    <textarea id="input" placeholder="Research and safely evaluate https://github.com/pypa/sampleproject"></textarea>
+    <div class="capture-actions"><button id="submit" class="primary">Send through the full pipeline →</button><button id="sample" class="secondary">Load repository example</button><button id="listen" class="secondary">Browser mic demo</button></div>
+  </section>
+
+  <section class="metric-strip panel-wide">
+    <div><b id="mArchive">0</b><span>encrypted transcript events</span></div>
+    <div><b id="mAudio">0</b><span>encrypted audio chunks</span></div>
+    <div><b id="mJobs">0</b><span>Hermes jobs</span></div>
+    <div><b id="mDone">0</b><span>completed runs</span></div>
+    <div><b id="mLatency">—</b><span>average latency</span></div>
+  </section>
+
+  <section class="grid dashboard-grid">
+    <div class="panel"><div class="section-head"><div><p class="eyebrow">real-time action trace</p><h2>Hermes jobs</h2></div><span class="live">● LIVE</span></div><div id="jobs" class="runs"><div class="empty">Waiting for a job…</div></div></div>
+    <div class="panel"><div class="section-head"><div><p class="eyebrow">promoted memory</p><h2>Relevant only</h2></div><span id="memoryCount">0 items</span></div><div id="memories" class="runs"><div class="empty">No promoted signals.</div></div></div>
+  </section>
+
+  <section class="panel-wide control-proof">
+    <div><p class="eyebrow">autonomy supervisor</p><h2 id="controlTitle">Loading control plane…</h2><p id="controlDetail" class="lede"></p></div>
+    <div id="integrations" class="integrations"></div>
+  </section>
+</main>
+<footer><span>Followthrough · Hermes Buildathon SF</span><span>Cloudflare edge · Spark runtime · Discord receipts</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

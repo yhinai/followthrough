@@ -7,6 +7,12 @@ __pycache__/
 *.pyc
 data/*.db*
 data/audio/
+data/archive/
+data/backups/
+data/jobs/
+data/runner/
+data/self-improvement/
+data/effects/
 data/reports/*
 !data/reports/.gitkeep
-
+data/soak/

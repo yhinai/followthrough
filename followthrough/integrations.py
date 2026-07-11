@@ -13,7 +13,50 @@ def entity(text: str) -> str:
     if url:
         return url.group(0).rstrip(".,)")
     found = re.search(r"(?:from|at|about|for)\s+([A-Z][\w.-]+(?:\s+[A-Z][\w.-]+)?)", text)
-    return found.group(1) if found else text[:100]
+    return found.group(1) if found else "the identified opportunity"
+
+
+_CREDENTIAL_PATTERNS = (
+    re.compile(
+        r"\b(?:api[ _-]?key|access[ _-]?token|token|password|passcode|secret|pin)"
+        r"\s*(?:is|=|:)?\s*[^\s,;]+",
+        re.I,
+    ),
+    re.compile(r"\b(?:sk|ghp|github_pat|hk|gsk)_[A-Za-z0-9_-]{10,}\b", re.I),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{10,}=*", re.I),
+)
+
+
+def operational_entity(text: str, category: str) -> str:
+    """Return the minimum relevant action text permitted outside the archive.
+
+    Repository/tool research normally needs only a URL or named entity. Tasks,
+    events, contacts, and goals require a bounded actionable clause; keeping
+    that clause is intentional operational memory, while the complete source
+    transcript remains encrypted in the archive.
+    """
+
+    named = entity(text)
+    if named != "the identified opportunity":
+        return named
+    if category not in {"todo", "event", "contact", "goal"}:
+        return named
+    clean = " ".join(text.split())
+    for pattern in _CREDENTIAL_PATTERNS:
+        clean = pattern.sub("[redacted credential]", clean)
+    if category == "todo":
+        marker = re.search(
+            r"(?i)\b(?:remind\s+me(?:\s+to)?|to[- ]?do|action\s+item|"
+            r"(?:i|we)\s+(?:need|have|must)\s+to)\b[:\s-]*([^.!?\n]{1,180})",
+            clean,
+        )
+        if marker and marker.group(1).strip():
+            clean = marker.group(1).strip()
+        else:
+            # A relevant TODO without a bounded action clause stays useful but
+            # must not leak the surrounding conversation into operational memory.
+            clean = "Review and complete the captured commitment"
+    return clean[:180] or named
 
 
 def linkup(text: str, api_key: str) -> dict[str, Any]:

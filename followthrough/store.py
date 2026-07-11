@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .relevance import Category, CorrectionRecord, Disposition, InterestModel, InterestWeight
+
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
@@ -16,6 +18,7 @@ def now() -> str:
 class Store:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.lock = threading.Lock()
@@ -47,16 +50,632 @@ class Store:
               id TEXT PRIMARY KEY, name TEXT NOT NULL, job TEXT NOT NULL,
               tools_json TEXT NOT NULL, guardrails TEXT NOT NULL, created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS archive_events (
+              id TEXT PRIMARY KEY, event_id TEXT NOT NULL UNIQUE, device_id TEXT NOT NULL,
+              source TEXT NOT NULL, occurred_at TEXT NOT NULL, received_at TEXT NOT NULL,
+              transcript_cipher BLOB NOT NULL, transcript_sha256 TEXT NOT NULL,
+              relevant INTEGER NOT NULL, classification TEXT NOT NULL,
+              metadata_json TEXT NOT NULL, run_id TEXT UNIQUE
+            );
+            CREATE TABLE IF NOT EXISTS audio_chunks (
+              id TEXT PRIMARY KEY, archive_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+              path TEXT NOT NULL, mime_type TEXT NOT NULL, plaintext_sha256 TEXT NOT NULL,
+              plaintext_bytes INTEGER NOT NULL, created_at TEXT NOT NULL,
+              UNIQUE(archive_id, sequence), FOREIGN KEY(archive_id) REFERENCES archive_events(id)
+            );
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+              name TEXT PRIMARY KEY, applied_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS relevance_decisions (
+              archive_id TEXT PRIMARY KEY, event_id TEXT NOT NULL UNIQUE,
+              content_fingerprint TEXT NOT NULL, disposition TEXT NOT NULL,
+              owner_status TEXT NOT NULL, categories_json TEXT NOT NULL,
+              confidence REAL NOT NULL, reason_code TEXT NOT NULL,
+              evidence_json TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS interest_weights (
+              category TEXT PRIMARY KEY, weight REAL NOT NULL,
+              source TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS relevance_corrections (
+              content_fingerprint TEXT PRIMARY KEY, disposition TEXT NOT NULL,
+              categories_json TEXT NOT NULL, reason_code TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS operational_memories (
+              id TEXT PRIMARY KEY, archive_id TEXT NOT NULL UNIQUE, run_id TEXT NOT NULL,
+              content_fingerprint TEXT NOT NULL, category TEXT NOT NULL,
+              entity TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS hermes_jobs (
+              id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE,
+              archive_id TEXT NOT NULL UNIQUE, event_id TEXT NOT NULL UNIQUE,
+              idempotency_key TEXT NOT NULL UNIQUE, task_id TEXT UNIQUE,
+              state TEXT NOT NULL, capsule_path TEXT NOT NULL,
+              category TEXT NOT NULL, entity TEXT NOT NULL,
+              intent TEXT NOT NULL DEFAULT '', acceptance_json TEXT NOT NULL DEFAULT '[]',
+              discord_chat_id TEXT, discord_user_id TEXT,
+              attempts INTEGER NOT NULL DEFAULT 0,
+              notification_state TEXT NOT NULL DEFAULT 'pending',
+              notification_json TEXT,
+              hermes_status TEXT, latest_outcome TEXT, diagnostics_json TEXT NOT NULL DEFAULT '[]',
+              last_error TEXT, last_sync_at TEXT,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS service_heartbeats (
+              name TEXT PRIMARY KEY, status TEXT NOT NULL,
+              details_json TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS hermes_task_history (
+              id TEXT PRIMARY KEY, job_id TEXT NOT NULL, task_id TEXT NOT NULL,
+              idempotency_key TEXT NOT NULL, outcome TEXT NOT NULL,
+              reason TEXT NOT NULL, archived_at TEXT NOT NULL
+            );
             """
         )
+        self._ensure_column("runs", "archive_event_id", "TEXT")
+        self._ensure_column("hermes_jobs", "intent", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column("hermes_jobs", "acceptance_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("hermes_jobs", "discord_chat_id", "TEXT")
+        self._ensure_column("hermes_jobs", "discord_user_id", "TEXT")
+        self._ensure_column("hermes_jobs", "notification_json", "TEXT")
+        self._ensure_column("hermes_jobs", "hermes_status", "TEXT")
+        self._ensure_column("hermes_jobs", "latest_outcome", "TEXT")
+        self._ensure_column("hermes_jobs", "diagnostics_json", "TEXT NOT NULL DEFAULT '[]'")
         self.db.commit()
 
-    def create_run(self, text: str, source: str, signal_type: str, title: str) -> str:
+    def _ensure_column(self, table: str, column: str, declaration: str) -> None:
+        existing = {row[1] for row in self.db.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+    def create_run(self, source: str, signal_type: str, title: str, archive_event_id: str | None = None) -> str:
         run_id = str(uuid.uuid4())
         with self.lock:
-            self.db.execute("INSERT INTO runs(id,text,source,signal_type,title,status,created_at) VALUES(?,?,?,?,?,?,?)", (run_id, text, source, signal_type, title, "queued", now()))
+            self.db.execute("INSERT INTO runs(id,text,source,signal_type,title,status,created_at,archive_event_id) VALUES(?,?,?,?,?,?,?,?)", (run_id, "[encrypted archive]", source, signal_type, title, "queued", now(), archive_event_id))
             self.db.commit()
         return run_id
+
+    def archive_event(
+        self,
+        *,
+        event_id: str,
+        device_id: str,
+        source: str,
+        occurred_at: str,
+        transcript_cipher: bytes,
+        transcript_sha256: str,
+        relevant: bool,
+        classification: str,
+        metadata: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        archive_id = str(uuid.uuid4())
+        received_at = now()
+        with self.lock:
+            existing = self.db.execute("SELECT * FROM archive_events WHERE event_id=?", (event_id,)).fetchone()
+            if existing:
+                return dict(existing), False
+            self.db.execute(
+                "INSERT INTO archive_events(id,event_id,device_id,source,occurred_at,received_at,transcript_cipher,transcript_sha256,relevant,classification,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (archive_id, event_id, device_id, source, occurred_at, received_at, transcript_cipher, transcript_sha256, int(relevant), classification, json.dumps(metadata, default=str)),
+            )
+            self.db.commit()
+        return self.archive_by_id(archive_id) or {}, True
+
+    def archive_by_event(self, event_id: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM archive_events WHERE event_id=?", (event_id,)).fetchone()
+        return dict(row) if row else None
+
+    def archive_by_id(self, archive_id: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM archive_events WHERE id=?", (archive_id,)).fetchone()
+        return dict(row) if row else None
+
+    def set_archive_classification(self, archive_id: str, *, relevant: bool, classification: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE archive_events SET relevant=?, classification=? WHERE id=?", (int(relevant), classification, archive_id))
+            self.db.commit()
+
+    def audio_chunk(self, archive_id: str, sequence: int) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM audio_chunks WHERE archive_id=? AND sequence=?", (archive_id, sequence)).fetchone()
+        return dict(row) if row else None
+
+    def audio_manifest(self, archive_id: str) -> dict[str, Any]:
+        sequences = [row[0] for row in self.db.execute("SELECT sequence FROM audio_chunks WHERE archive_id=? ORDER BY sequence", (archive_id,)).fetchall()]
+        missing: list[int] = []
+        if sequences:
+            present = set(sequences)
+            missing = [number for number in range(sequences[0], sequences[-1] + 1) if number not in present]
+        return {"sequences": sequences, "missing": missing, "complete": not missing, "chunks": len(sequences)}
+
+    def add_audio_chunk(self, archive_id: str, sequence: int, path: str, mime_type: str, digest: str, size: int) -> tuple[dict[str, Any], bool]:
+        chunk_id = str(uuid.uuid4())
+        with self.lock:
+            existing = self.db.execute("SELECT * FROM audio_chunks WHERE archive_id=? AND sequence=?", (archive_id, sequence)).fetchone()
+            if existing:
+                return dict(existing), False
+            self.db.execute("INSERT INTO audio_chunks(id,archive_id,sequence,path,mime_type,plaintext_sha256,plaintext_bytes,created_at) VALUES(?,?,?,?,?,?,?,?)", (chunk_id, archive_id, sequence, path, mime_type, digest, size, now()))
+            self.db.commit()
+        return self.audio_chunk(archive_id, sequence) or {}, True
+
+    def migrate_plaintext_runs(self, encrypt: Any) -> int:
+        rows = self.db.execute("SELECT id,text,source,signal_type,status,created_at,archive_event_id FROM runs WHERE text != '[encrypted archive]'").fetchall()
+        migrated = 0
+        for row in rows:
+            plaintext = (row["text"] or "").encode()
+            event_id = f"legacy:{row['id']}"
+            associated_data = f"transcript:{event_id}".encode()
+            archived, _ = self.archive_event(
+                event_id=event_id,
+                device_id="legacy",
+                source=row["source"],
+                occurred_at=row["created_at"],
+                transcript_cipher=encrypt(plaintext, associated_data),
+                transcript_sha256=__import__("hashlib").sha256(plaintext).hexdigest(),
+                relevant=row["status"] != "discarded",
+                classification=row["signal_type"],
+                metadata={"migration": "plaintext-runs-v1"},
+            )
+            with self.lock:
+                self.db.execute("UPDATE runs SET text='[encrypted archive]', archive_event_id=? WHERE id=?", (archived["id"], row["id"]))
+                self.db.execute("UPDATE archive_events SET run_id=? WHERE id=?", (row["id"], archived["id"]))
+                self.db.commit()
+            migrated += 1
+        return migrated
+
+    def scrub_legacy_operational_plaintext(self) -> dict[str, int]:
+        """Remove raw transcript copies left by the pre-archive demo pipeline."""
+        migration = "scrub-legacy-operational-plaintext-v1"
+        if self.db.execute("SELECT 1 FROM schema_migrations WHERE name=?", (migration,)).fetchone():
+            return {"steps": 0, "evals": 0, "reports": 0}
+        rewritten_steps = 0
+        rewritten_reports = 0
+        safe_inputs = {
+            "hermes_manager": "encrypted transcript + remembered context",
+            "linkup_researcher": "entity research request",
+            "opportunity_scorer": "derived research + remembered context",
+            "relationship_writer": "recipient/consent guardrail",
+        }
+        rows = self.db.execute("SELECT id,agent,input_summary,output_json FROM steps").fetchall()
+        with self.lock:
+            for row in rows:
+                output = json.loads(row["output_json"])
+                changed = False
+                if isinstance(output, dict) and "signal" in output:
+                    output.pop("signal", None)
+                    changed = True
+                replacement = safe_inputs.get(row["agent"])
+                if replacement and row["input_summary"] != replacement:
+                    changed = True
+                if changed:
+                    self.db.execute(
+                        "UPDATE steps SET input_summary=?, output_json=? WHERE id=?",
+                        (replacement or row["input_summary"], json.dumps(output, default=str), row["id"]),
+                    )
+                    rewritten_steps += 1
+            eval_count = self.db.execute("UPDATE eval_cases SET input_text='[encrypted archive]' WHERE input_text != '[encrypted archive]'").rowcount
+            self.db.commit()
+        run_rows = self.db.execute("SELECT id,summary FROM runs WHERE summary IS NOT NULL").fetchall()
+        with self.lock:
+            for row in run_rows:
+                try:
+                    summary = json.loads(row["summary"])
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if isinstance(summary, dict) and "signal" in summary:
+                    summary.pop("signal", None)
+                    self.db.execute("UPDATE runs SET summary=? WHERE id=?", (json.dumps(summary, default=str), row["id"]))
+            self.db.execute(
+                "UPDATE steps SET output_json=json_set(output_json, '$.message', '[legacy draft removed; regenerate from encrypted archive]') WHERE agent='relationship_writer' AND json_valid(output_json)"
+            )
+            self.db.commit()
+        reports_dir = self.path.parent / "reports"
+        if reports_dir.is_dir():
+            for report in reports_dir.glob("*.md"):
+                if report.name == ".gitkeep" or "**Signal:**" not in report.read_text(errors="replace"):
+                    continue
+                report.write_text("# Followthrough report\n\nLegacy plaintext report removed. The source transcript remains in the encrypted archive.\n")
+                report.chmod(0o600)
+                rewritten_reports += 1
+        with self.lock:
+            self.db.execute("INSERT INTO schema_migrations(name,applied_at) VALUES(?,?)", (migration, now()))
+            self.db.commit()
+        return {"steps": rewritten_steps, "evals": eval_count, "reports": rewritten_reports}
+
+    def purge_split_archive_rows(self) -> dict[str, int]:
+        migration = "purge-split-archive-rows-v1"
+        if self.db.execute("SELECT 1 FROM schema_migrations WHERE name=?", (migration,)).fetchone():
+            return {"events": 0, "audio_chunks": 0}
+        with self.lock:
+            chunks = self.db.execute("SELECT COUNT(*) FROM audio_chunks").fetchone()[0]
+            events = self.db.execute("SELECT COUNT(*) FROM archive_events").fetchone()[0]
+            self.db.execute("DELETE FROM audio_chunks")
+            self.db.execute("DELETE FROM archive_events")
+            self.db.execute("INSERT INTO schema_migrations(name,applied_at) VALUES(?,?)", (migration, now()))
+            self.db.commit()
+        self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        self.db.execute("VACUUM")
+        return {"events": events, "audio_chunks": chunks}
+
+    def record_relevance(self, archive_id: str, event_id: str, decision: dict[str, Any]) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT OR REPLACE INTO relevance_decisions(archive_id,event_id,content_fingerprint,disposition,owner_status,categories_json,confidence,reason_code,evidence_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (
+                    archive_id,
+                    event_id,
+                    decision["content_fingerprint"],
+                    decision["disposition"],
+                    decision["owner_status"],
+                    json.dumps(decision["categories"]),
+                    float(decision["confidence"]),
+                    decision["reason_code"],
+                    json.dumps(decision["evidence"], default=str),
+                    now(),
+                ),
+            )
+            self.db.commit()
+
+    def relevance_for_event(self, event_id: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM relevance_decisions WHERE event_id=?", (event_id,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["categories"] = json.loads(result.pop("categories_json"))
+        result["evidence"] = json.loads(result.pop("evidence_json"))
+        return result
+
+    def interest_model(self) -> InterestModel:
+        weights = tuple(
+            InterestWeight(Category(row["category"]), float(row["weight"]), row["source"])
+            for row in self.db.execute("SELECT category,weight,source FROM interest_weights ORDER BY category")
+        )
+        corrections = tuple(
+            CorrectionRecord(
+                content_fingerprint=row["content_fingerprint"],
+                disposition=Disposition(row["disposition"]),
+                categories=tuple(Category(value) for value in json.loads(row["categories_json"])),
+                reason_code=row["reason_code"],
+            )
+            for row in self.db.execute("SELECT * FROM relevance_corrections ORDER BY updated_at")
+        )
+        return InterestModel(weights=weights, corrections=corrections)
+
+    def set_interest_weight(self, weight: InterestWeight) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO interest_weights(category,weight,source,updated_at) VALUES(?,?,?,?) ON CONFLICT(category) DO UPDATE SET weight=excluded.weight,source=excluded.source,updated_at=excluded.updated_at",
+                (weight.category.value, weight.weight, weight.source, now()),
+            )
+            self.db.commit()
+
+    def add_relevance_correction(self, correction: CorrectionRecord) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO relevance_corrections(content_fingerprint,disposition,categories_json,reason_code,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(content_fingerprint) DO UPDATE SET disposition=excluded.disposition,categories_json=excluded.categories_json,reason_code=excluded.reason_code,updated_at=excluded.updated_at",
+                (
+                    correction.content_fingerprint,
+                    correction.disposition.value,
+                    json.dumps([category.value for category in correction.categories]),
+                    correction.reason_code,
+                    now(),
+                ),
+            )
+            self.db.commit()
+
+    def add_operational_memory(self, archive_id: str, run_id: str, fingerprint: str, category: str, entity: str) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT OR IGNORE INTO operational_memories(id,archive_id,run_id,content_fingerprint,category,entity,created_at) VALUES(?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), archive_id, run_id, fingerprint, category, entity, now()),
+            )
+            self.db.commit()
+
+    def list_operational_memories(self, limit: int = 100) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.db.execute("SELECT * FROM operational_memories ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        ]
+
+    def create_hermes_job(
+        self,
+        *,
+        job_id: str,
+        run_id: str,
+        archive_id: str,
+        event_id: str,
+        idempotency_key: str,
+        capsule_path: str,
+        category: str,
+        entity: str,
+        intent: str = "Research and evaluate the named item, then return cited findings and a safe next action.",
+        acceptance: list[str] | tuple[str, ...] = ("Use primary sources", "Verify claims", "Record blocked effects"),
+        discord_chat_id: str | None = None,
+        discord_user_id: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        timestamp = now()
+        with self.lock:
+            existing = self.db.execute("SELECT * FROM hermes_jobs WHERE run_id=? OR archive_id=? OR event_id=?", (run_id, archive_id, event_id)).fetchone()
+            if existing:
+                return dict(existing), False
+            self.db.execute(
+                "INSERT INTO hermes_jobs(id,run_id,archive_id,event_id,idempotency_key,state,capsule_path,category,entity,intent,acceptance_json,discord_chat_id,discord_user_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?)",
+                (job_id, run_id, archive_id, event_id, idempotency_key, capsule_path, category, entity, intent[:500], json.dumps(list(acceptance)[:20]), discord_chat_id, discord_user_id, timestamp, timestamp),
+            )
+            self.db.commit()
+        return self.hermes_job(job_id) or {}, True
+
+    def hermes_job(self, job_id: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM hermes_jobs WHERE id=?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
+    def hermes_job_for_run(self, run_id: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
+        return dict(row) if row else None
+
+    def pending_hermes_jobs(self, limit: int = 10) -> list[dict[str, Any]]:
+        return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs WHERE state IN ('pending','retry','dispatching') ORDER BY created_at LIMIT ?", (limit,)).fetchall()]
+
+    def unnotified_hermes_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
+        return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND notification_state != 'subscribed' AND state NOT IN ('completed','cancelled') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()]
+
+    def active_hermes_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
+        return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()]
+
+    def mark_hermes_dispatching(self, job_id: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET state='dispatching',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?", (now(), job_id))
+            self.db.commit()
+
+    def mark_hermes_enqueued(self, job_id: str, task_id: str) -> None:
+        timestamp = now()
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET task_id=?,state='enqueued',last_error=NULL,last_sync_at=?,updated_at=? WHERE id=?", (task_id, timestamp, timestamp, job_id))
+            self.db.execute("UPDATE runs SET status='queued' WHERE id=(SELECT run_id FROM hermes_jobs WHERE id=?)", (job_id,))
+            self.db.commit()
+
+    def mark_hermes_retry(self, job_id: str, error: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET state='retry',last_error=?,updated_at=? WHERE id=?", (error[:500], now(), job_id))
+            self.db.commit()
+
+    def mark_hermes_notification(self, job_id: str, state: str, error: str | None = None) -> None:
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET notification_state=?,last_error=COALESCE(?,last_error),updated_at=? WHERE id=?", (state, error[:500] if error else None, now(), job_id))
+            self.db.commit()
+
+    def sync_hermes_job(self, job_id: str, state: str, summary: str | None = None, error: str | None = None) -> None:
+        timestamp = now()
+        run_status = {
+            "queued": "queued",
+            "enqueued": "queued",
+            "in_progress": "running",
+            "completed": "completed",
+            "dead_letter": "failed",
+            "needs_attention": "needs_attention",
+            "cancelled": "cancelled",
+        }.get(state, state)
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET state=?,last_error=?,last_sync_at=?,updated_at=? WHERE id=?", (state, error[:500] if error else None, timestamp, timestamp, job_id))
+            job = self.db.execute("SELECT run_id FROM hermes_jobs WHERE id=?", (job_id,)).fetchone()
+            if job:
+                fields: dict[str, Any] = {"status": run_status}
+                if summary:
+                    fields["summary"] = summary[:20_000]
+                if state == "completed":
+                    fields.update({"finished_at": timestamp, "success": 1})
+                elif state in {"dead_letter", "cancelled"}:
+                    fields.update({"finished_at": timestamp, "success": 0})
+                clause = ",".join(f"{key}=?" for key in fields)
+                self.db.execute(f"UPDATE runs SET {clause} WHERE id=?", (*fields.values(), job["run_id"]))
+            self.db.commit()
+
+    def hermes_job_counts(self) -> dict[str, int]:
+        return {row["state"]: row["count"] for row in self.db.execute("SELECT state,COUNT(*) count FROM hermes_jobs GROUP BY state")}
+
+    def list_hermes_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
+        return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()]
+
+    def kanban_pending_create(self, *, limit: int) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NULL AND state IN ('pending','retry','dispatching') ORDER BY created_at LIMIT ?", (limit,)).fetchall()
+            identifiers = [row["id"] for row in rows]
+            if identifiers:
+                placeholders = ",".join("?" for _ in identifiers)
+                self.db.execute(f"UPDATE hermes_jobs SET state='dispatching',attempts=attempts+1,updated_at=? WHERE id IN ({placeholders})", (now(), *identifiers))
+                self.db.commit()
+        return [
+            {
+                "run_id": row["run_id"],
+                "archive_id": row["archive_id"],
+                "category": row["category"],
+                "entity": row["entity"],
+                "intent": row["intent"],
+                "acceptance": json.loads(row["acceptance_json"]),
+            }
+            for row in rows
+        ]
+
+    def kanban_record_created(self, run_id: str, *, task_id: str, idempotency_key: str, capsule_path: str, hermes_status: str) -> None:
+        timestamp = now()
+        with self.lock:
+            self.db.execute(
+                "UPDATE hermes_jobs SET task_id=?,idempotency_key=?,capsule_path=?,state='enqueued',hermes_status=?,last_error=NULL,last_sync_at=?,updated_at=? WHERE run_id=?",
+                (task_id, idempotency_key, capsule_path, hermes_status, timestamp, timestamp, run_id),
+            )
+            self.db.execute("UPDATE runs SET status='queued' WHERE id=?", (run_id,))
+            self.db.commit()
+
+    def kanban_record_create_failure(self, run_id: str, *, error: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET state='retry',last_error=?,updated_at=? WHERE run_id=?", (error[:500], now(), run_id))
+            self.db.commit()
+
+    def kanban_pending_notifications(self, *, limit: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "run_id": row["run_id"],
+                "task_id": row["task_id"],
+                "discord_chat_id": row["discord_chat_id"],
+                "discord_user_id": row["discord_user_id"],
+            }
+            for row in self.db.execute(
+                "SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND discord_chat_id IS NOT NULL AND notification_state != 'subscribed' AND state NOT IN ('completed','cancelled') ORDER BY updated_at LIMIT ?",
+                (limit,),
+            ).fetchall()
+        ]
+
+    def kanban_record_notified(self, run_id: str, *, subscription: dict[str, str]) -> None:
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET notification_state='subscribed',notification_json=?,last_error=NULL,updated_at=? WHERE run_id=?", (json.dumps(subscription, sort_keys=True), now(), run_id))
+            self.db.commit()
+
+    def kanban_record_notification_failure(self, run_id: str, *, error: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET notification_state='retry',last_error=?,updated_at=? WHERE run_id=?", (error[:500], now(), run_id))
+            self.db.commit()
+
+    def kanban_active(self, *, limit: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "run_id": row["run_id"],
+                "task_id": row["task_id"],
+                "event_id": row["event_id"],
+            }
+            for row in self.db.execute("SELECT run_id,task_id,event_id FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()
+        ]
+
+    def kanban_record_reconciled(self, run_id: str, *, task_id: str, state: str, hermes_status: str, latest_outcome: str, diagnostics: list[str] | tuple[str, ...]) -> bool:
+        timestamp = now()
+        run_status = {
+            "queued": "queued",
+            "enqueued": "queued",
+            "in_progress": "running",
+            "completed": "completed",
+            "dead_letter": "failed",
+            "needs_attention": "needs_attention",
+            "cancelled": "cancelled",
+        }.get(state, state)
+        with self.lock:
+            job = self.db.execute(
+                "SELECT id,run_id FROM hermes_jobs WHERE run_id=? AND task_id=?",
+                (run_id, task_id),
+            ).fetchone()
+            if not job:
+                return False
+            changed = self.db.execute(
+                "UPDATE hermes_jobs SET state=?,hermes_status=?,latest_outcome=?,diagnostics_json=?,last_error=NULL,last_sync_at=?,updated_at=? WHERE id=? AND task_id=?",
+                (
+                    state,
+                    hermes_status,
+                    latest_outcome,
+                    json.dumps(list(diagnostics)),
+                    timestamp,
+                    timestamp,
+                    job["id"],
+                    task_id,
+                ),
+            )
+            if changed.rowcount != 1:
+                self.db.rollback()
+                return False
+            fields: dict[str, Any] = {"status": run_status}
+            if state == "completed":
+                fields.update({"finished_at": timestamp, "success": 1})
+            elif state in {"dead_letter", "cancelled"}:
+                fields.update({"finished_at": timestamp, "success": 0})
+            clause = ",".join(f"{key}=?" for key in fields)
+            self.db.execute(
+                f"UPDATE runs SET {clause} WHERE id=?",
+                (*fields.values(), run_id),
+            )
+            self.db.commit()
+        return True
+
+    def kanban_record_reconcile_failure(self, run_id: str, *, error: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET last_error=?,last_sync_at=?,updated_at=? WHERE run_id=?", (error[:500], now(), now(), run_id))
+            self.db.commit()
+
+    def heartbeat(self, name: str, status: str, details: dict[str, Any] | None = None) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO service_heartbeats(name,status,details_json,updated_at) VALUES(?,?,?,?) ON CONFLICT(name) DO UPDATE SET status=excluded.status,details_json=excluded.details_json,updated_at=excluded.updated_at",
+                (name, status, json.dumps(details or {}, default=str, sort_keys=True), now()),
+            )
+            self.db.commit()
+
+    def heartbeat_status(self, name: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM service_heartbeats WHERE name=?", (name,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["details"] = json.loads(result.pop("details_json"))
+        return result
+
+    def supersede_hermes_task(
+        self,
+        run_id: str,
+        *,
+        expected_task_id: str,
+        idempotency_key: str,
+        reason: str,
+        replacement_entity: str | None = None,
+    ) -> None:
+        timestamp = now()
+        if replacement_entity is not None:
+            replacement_entity = " ".join(replacement_entity.split())[:240]
+            if not replacement_entity:
+                raise ValueError("replacement entity must not be empty")
+        with self.lock:
+            job = self.db.execute("SELECT * FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
+            if not job or job["task_id"] != expected_task_id:
+                raise ValueError("Hermes task changed before supersession")
+            self.db.execute(
+                "INSERT INTO hermes_task_history(id,job_id,task_id,idempotency_key,outcome,reason,archived_at) VALUES(?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), job["id"], expected_task_id, job["idempotency_key"], "superseded", reason[:500], timestamp),
+            )
+            self.db.execute(
+                "UPDATE hermes_jobs SET task_id=NULL,idempotency_key=?,entity=COALESCE(?,entity),state='retry',notification_state='pending',notification_json=NULL,hermes_status='superseded',latest_outcome='superseded',diagnostics_json='[]',last_error=?,updated_at=? WHERE run_id=?",
+                (idempotency_key, replacement_entity, reason[:500], timestamp, run_id),
+            )
+            self.db.execute("UPDATE runs SET status='queued',success=NULL,finished_at=NULL WHERE id=?", (run_id,))
+            self.db.commit()
+
+    def cancel_nonrunning_hermes_job(self, run_id: str, *, reason: str) -> bool:
+        """Cancel a false-positive job only when no worker can still be running."""
+
+        timestamp = now()
+        with self.lock:
+            job = self.db.execute(
+                "SELECT * FROM hermes_jobs WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            if not job or job["state"] not in {"pending", "retry", "needs_attention"}:
+                return False
+            if job["task_id"]:
+                self.db.execute(
+                    "INSERT INTO hermes_task_history(id,job_id,task_id,idempotency_key,outcome,reason,archived_at) VALUES(?,?,?,?,?,?,?)",
+                    (
+                        str(uuid.uuid4()),
+                        job["id"],
+                        job["task_id"],
+                        job["idempotency_key"],
+                        "cancelled",
+                        reason[:500],
+                        timestamp,
+                    ),
+                )
+            self.db.execute(
+                "UPDATE hermes_jobs SET state='cancelled',last_error=?,last_sync_at=?,updated_at=? WHERE id=?",
+                (reason[:500], timestamp, timestamp, job["id"]),
+            )
+            self.db.execute("DELETE FROM operational_memories WHERE run_id=?", (run_id,))
+            self.db.execute(
+                "UPDATE runs SET status='cancelled',success=0,finished_at=? WHERE id=?",
+                (timestamp, run_id),
+            )
+            self.db.commit()
+        return True
 
     def update_run(self, run_id: str, **fields: Any) -> None:
         if not fields:
@@ -85,9 +704,9 @@ class Store:
         return [dict(r) for r in self.db.execute("SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()]
 
     def metrics(self) -> dict[str, Any]:
-        r = self.db.execute("SELECT COUNT(*) total, SUM(status='completed') completed, SUM(status='discarded') discarded, AVG(latency_ms) latency FROM runs").fetchone()
+        r = self.db.execute("SELECT COUNT(*) total, SUM(status='completed') completed, AVG(latency_ms) latency FROM runs").fetchone()
         users = self.db.execute("SELECT COUNT(*) FROM users WHERE first_use_at IS NOT NULL").fetchone()[0]
-        return {"total": r[0] or 0, "completed": r[1] or 0, "discarded": r[2] or 0, "avg_latency_ms": round(r[3] or 0), "activated_users": users}
+        return {"operational_total": r[0] or 0, "completed": r[1] or 0, "avg_latency_ms": round(r[2] or 0), "activated_users": users}
 
     def add_eval(self, run_id: str | None, input_text: str, expected: str, observed: str) -> None:
         with self.lock:

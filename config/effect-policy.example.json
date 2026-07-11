@@ -1,0 +1,39 @@
+{
+  "rules": {
+    "private_task.create": {
+      "mode": "auto"
+    },
+    "calendar.event.upsert": {
+      "mode": "auto",
+      "allow_attendee_notifications": false
+    },
+    "discord.message.send": {
+      "mode": "auto",
+      "allowed_targets": [
+        "discord:OWNER_DM_ID"
+      ],
+      "allow_mentions": false
+    },
+    "github.issue.create": {
+      "mode": "auto",
+      "allowed_repositories": [
+        "OWNER/REPOSITORY"
+      ]
+    },
+    "deployment.trigger": {
+      "mode": "auto",
+      "allowed_repositories": [
+        "OWNER/REPOSITORY"
+      ],
+      "allow_production": false
+    },
+    "purchase.create": {
+      "mode": "auto",
+      "allowed_vendors": [],
+      "allow_live_purchase": false,
+      "max_single_amount_minor": 2500,
+      "max_daily_amount_minor": 10000,
+      "currency": "USD"
+    }
+  }
+}
