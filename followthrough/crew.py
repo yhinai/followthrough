@@ -63,7 +63,7 @@ class Crew:
         summary = json.dumps(brief)
         self.store.update_run(run_id, status="completed", finished_at=now(), latency_ms=elapsed, success=1, summary=summary, report_url=f"/api/reports/{report_path.name}", voice_url=(f"/api/audio/{audio_path.name}" if audio_path else None))
         convex_event({"run_id": run_id, "classification": classification.__dict__, "plan": plan, "brief": brief, "created_at": now()}, self.settings.convex_url, getattr(self.settings, "convex_deploy_key", ""))
-        return {"run_id": run_id, "status": "completed", "classification": classification.__dict__, "plan": plan, "research": research, "brief": brief, "voice_url": (f"/api/audio/{audio_path.name}" if audio_path else None), "latency_ms": elapsed}
+        return {"run_id": run_id, "status": "completed", "classification": classification.__dict__, "plan": plan, "research": research, "brief": brief, "report_url": f"/api/reports/{report_path.name}", "voice_url": (f"/api/audio/{audio_path.name}" if audio_path else None), "latency_ms": elapsed}
 
     def _brief(self, text: str, classification: Classification, plan: dict[str, Any], research: dict[str, Any]) -> dict[str, Any]:
         answer = research.get("answer", "Research adapter is waiting for the event Linkup key.")
