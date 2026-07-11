@@ -1,0 +1,5 @@
+[
+  {"input": "I met Maya from Acme. Research Acme and draft a Tuesday follow-up.", "expected": "actionable"},
+  {"input": "Lunch was great; the sandwich was perfect.", "expected": "ordinary_life"},
+  {"input": "Here is the GitHub repo https://github.com/example/project, investigate it.", "expected": "actionable"}
+]

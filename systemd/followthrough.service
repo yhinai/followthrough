@@ -1,0 +1,15 @@
+[Unit]
+Description=Followthrough Hermes Buildathon app
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alhinai/Projects/followthrough
+EnvironmentFile=-/home/alhinai/Projects/followthrough/.env
+Environment=PATH=/home/alhinai/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/alhinai/Projects/followthrough/.venv/bin/uvicorn followthrough.app:app --host 127.0.0.1 --port 18765 --no-access-log
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
