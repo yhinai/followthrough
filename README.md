@@ -16,3 +16,5 @@ cp .env.example .env
 Open `/`. Enable the visibly consented listening session or use the live sample. Ordinary chatter is classified and discarded before persistence. External messages are approval-gated.
 
 Partner keys are optional adapters until the event accounts are configured: Linkup powers live cited research, ElevenLabs produces the spoken completion, Convex mirrors authoritative run state, and Dodo is reserved for the live Event Pass checkout.
+
+Event handoff material lives in [docs/SUBMISSION.md](docs/SUBMISSION.md), [docs/DEMO.md](docs/DEMO.md), and [docs/PARTNER_CHECKLIST.md](docs/PARTNER_CHECKLIST.md). The sanitized environment template intentionally excludes every secret supplied through chat or attachments.
