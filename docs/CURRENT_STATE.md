@@ -23,7 +23,7 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 
 - Public health endpoint, Followthrough, orchestrator, and Cloudflare tunnel are active.
 - Public health reports `auth_required: false`; there are no Followthrough token files, token middleware, or dashboard token prompts.
-- Followthrough Python suite: 164 passed after the H session and Orgo desktop-control additions.
+- Followthrough Python suite: 167 passed after the H session and local Spark desktop additions.
 - Memo Android build: successful on OpenJDK 17.
 - Samsung `SM-F776U1`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified.
 
@@ -41,7 +41,7 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 | Layer | Current tool |
 |---|---|
 | Phone capture and playback | Memo Android foreground service, `AudioRecord`, `AudioTrack`, Gemini Live |
-| Desktop execution surface | Local-first Orgo Desktop API with remote Orgo fallback, verified action receipts, and a live dashboard screenshot |
+| Desktop execution surface | Free Spark X11/Chromium desktop with local typed API, optional remote Orgo fallback, verified action receipts, and embedded live noVNC |
 | Public ingress | Cloudflare Tunnel at `followthrough.alhinai.dev` |
 | API and dashboard | FastAPI/Uvicorn on Spark |
 | Durable state | Separate SQLite operations, archive, effects, and Hermes Kanban ledgers |
@@ -86,8 +86,9 @@ finalized transcript ingestion, completed Hermes research, restart-safe result
 recovery, and built-in-speaker routing. A fresh spoken actionable phrase remains
 the recommended final demo rehearsal; it is not a soak requirement.
 
-The Orgo desktop subsystem is implemented and tested but currently displays
-`Not configured` on Spark because neither a co-located Orgo Desktop API nor
-`ORGO_API_KEY` plus `ORGO_DEFAULT_COMPUTER_ID` is installed. This is an
-explicit readiness state, not a silent fallback. Live Orgo acceptance remains
-pending credential and computer provisioning.
+The free Spark desktop plane is active and restart-enabled. Public doctor and
+screenshot checks pass, the noVNC WebSocket negotiates RFB 3.8 through
+`followthrough.alhinai.dev`, and key/type/scroll actions produced distinct
+before/after frame fingerprints. A confirmation-gated desktop restart was
+also followed by a successful readiness and stream check. Orgo remains only
+an optional remote fallback and is not required for the demo.
