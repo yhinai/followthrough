@@ -180,6 +180,38 @@ def test_audit_receipts_are_hash_chained_and_tamper_evident(tmp_path) -> None:
     assert not controls.verify_audit_chain()
 
 
+def test_control_audit_is_serialized_across_store_connections(tmp_path) -> None:
+    import threading
+
+    path = tmp_path / "shared-control.db"
+    first = ControlPlane(Store(path))
+    second = ControlPlane(Store(path))
+    barrier = threading.Barrier(2)
+    errors: list[Exception] = []
+
+    def append_many(control: ControlPlane, actor: str) -> None:
+        try:
+            barrier.wait(timeout=5)
+            for index in range(30):
+                control.audit("parallel_probe", actor, f"probe_{index}")
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=append_many, args=(first, "api")),
+        threading.Thread(target=append_many, args=(second, "orchestrator")),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert not errors
+    assert all(not thread.is_alive() for thread in threads)
+    assert first.verify_audit_chain()
+    assert first.db.execute("SELECT COUNT(*) FROM control_audit").fetchone()[0] == 60
+
+
 def test_processing_task_command_is_recovered_after_worker_crash(tmp_path) -> None:
     store = Store(tmp_path / "operations.db")
     controls = ControlPlane(store)

@@ -42,6 +42,17 @@ def test_does_not_aggregate_ordinary_or_passive_tool_conversation() -> None:
     assert aggregator.add(segment(3, "and a startup founder"), monotonic_at=3) is None
 
 
+def test_aggregate_excludes_ordinary_buffered_prefix() -> None:
+    aggregator = TranscriptAggregator(window_seconds=45)
+    assert aggregator.add(segment(1, "My medical appointment is tomorrow"), monotonic_at=1) is None
+    assert aggregator.add(segment(2, "Followthrough please research"), monotonic_at=2) is None
+    result = aggregator.add(segment(3, "the GitHub repository pypa sampleproject"), monotonic_at=3)
+    assert result is not None
+    assert result.text == "Followthrough please research the GitHub repository pypa sampleproject"
+    assert "medical" not in result.text
+    assert result.occurred_at == segment(2, "unused").occurred_at
+
+
 def test_expired_action_segment_cannot_trigger() -> None:
     aggregator = TranscriptAggregator(window_seconds=10)
     assert aggregator.add(segment(1, "research this"), monotonic_at=1) is None

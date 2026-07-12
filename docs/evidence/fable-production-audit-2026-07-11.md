@@ -26,4 +26,6 @@ Claude Code 2.1.207 ran from the Followthrough repository with model `fable`, hi
 
 ## Deferred structural work
 
-The audit also identified larger changes requiring separate design and regression work: cross-process control-audit serialization, durable effect retry/outbox behavior, parked-job reconciliation races, supersession idempotency, bounded poison-job retries, aggregator privacy/duplicate behavior, broader static scan coverage, audio write TOCTOU hardening, key rotation/permission checks, device-aggregator eviction, and query-token compatibility risk. These remain explicit plan items rather than being hidden behind the passing suite.
+Follow-up implementation completed aggregate prefix privacy, aggregate replay idempotency, cross-process control-audit serialization, and atomic audio file/manifest persistence. The independently rerun suite is now 173 passed.
+
+Remaining structural work includes durable effect retry/outbox behavior, parked-job reconciliation races, supersession idempotency, bounded poison-job retries, broader static scan coverage, key rotation/permission checks, device-aggregator eviction, and query-token compatibility risk. These remain explicit plan items rather than being hidden behind the passing suite.

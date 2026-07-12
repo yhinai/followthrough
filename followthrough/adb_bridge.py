@@ -63,12 +63,26 @@ class TranscriptAggregator:
         ):
             self._segments.popleft()
 
-        text = " ".join(item.text.strip() for _, item in self._segments if item.text.strip())
+        candidates = [item for _, item in self._segments if item.text.strip()]
+        text = " ".join(item.text.strip() for item in candidates)
         if not (ACTION.search(text) and SUBJECT.search(text)):
             return None
 
-        occurred_at = self._segments[0][1].occurred_at
-        component_ids = "\0".join(item.event_id for _, item in self._segments)
+        # Dispatch the shortest contiguous suffix that contains both an action
+        # and a subject. Ambient speech that happened before the command remains
+        # in the encrypted component archive but never crosses into the
+        # operational aggregate sent to Hermes.
+        selected = candidates
+        for index in range(len(candidates) - 1, -1, -1):
+            suffix = candidates[index:]
+            suffix_text = " ".join(item.text.strip() for item in suffix)
+            if ACTION.search(suffix_text) and SUBJECT.search(suffix_text):
+                selected = suffix
+                text = suffix_text
+                break
+
+        occurred_at = selected[0].occurred_at
+        component_ids = "\0".join(item.event_id for item in selected)
         digest = hashlib.sha256(f"{component_ids}\0{text}".encode()).hexdigest()
         self._segments.clear()
         return Transcript(

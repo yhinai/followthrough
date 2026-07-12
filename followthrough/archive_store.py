@@ -5,6 +5,7 @@ import sqlite3
 import threading
 import uuid
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from .store import now
@@ -129,6 +130,42 @@ class ArchiveStore:
             )
             self.db.commit()
         return self.audio_chunk(archive_id, sequence) or {}, True
+
+    def persist_audio_chunk(
+        self,
+        archive_id: str,
+        sequence: int,
+        mime_type: str,
+        digest: str,
+        size: int,
+        writer: Callable[[], str | Path],
+    ) -> tuple[dict[str, Any], bool]:
+        """Serialize the filesystem write and manifest insert for one chunk.
+
+        The prior endpoint performed its existence check, encrypted-file
+        replacement, and database insert separately. Concurrent deliveries of
+        different bytes for the same sequence could therefore overwrite the
+        file after the winning digest was committed. Holding the archive lock
+        across all three steps makes the losing request observe the committed
+        row without touching the file.
+        """
+
+        chunk_id = str(uuid.uuid4())
+        with self.lock:
+            existing = self.db.execute(
+                "SELECT * FROM audio_chunks WHERE archive_id=? AND sequence=?",
+                (archive_id, sequence),
+            ).fetchone()
+            if existing:
+                return dict(existing), False
+            path = str(writer())
+            self.db.execute(
+                "INSERT INTO audio_chunks(id,archive_id,sequence,path,mime_type,plaintext_sha256,plaintext_bytes,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (chunk_id, archive_id, sequence, path, mime_type, digest, size, now()),
+            )
+            self.db.commit()
+            row = self.db.execute("SELECT * FROM audio_chunks WHERE id=?", (chunk_id,)).fetchone()
+        return dict(row), True
 
     def allocate_stream_sequence(self, stream_id: str, device_id: str, source: str) -> int:
         with self.lock:

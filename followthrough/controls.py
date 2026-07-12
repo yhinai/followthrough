@@ -183,6 +183,13 @@ class ControlPlane:
         capability: Capability | str | None = None,
         details: dict[str, Any] | None = None,
     ) -> str:
+        # Some audit paths (for example a denied authorization) have not
+        # written anything before reading the chain head. Acquire SQLite's
+        # cross-process writer reservation first so the API and orchestrator
+        # cannot both derive receipts from the same previous hash. Callers that
+        # already changed control state are already inside a write transaction.
+        if not self.db.in_transaction:
+            self.db.execute("BEGIN IMMEDIATE")
         receipt_id = str(uuid.uuid4())
         created_at = _now()
         previous = self.db.execute(

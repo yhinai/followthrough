@@ -107,6 +107,37 @@ def test_phone_fragments_are_centrally_aggregated_before_dispatch(configured_set
     assert component["classification"] == "aggregate_component"
 
 
+def test_retry_of_archived_action_does_not_create_second_aggregate(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    settings.kanban_enabled = True
+    settings.auto_send = True
+    app = create_app(settings)
+    payload = {
+        "event_id": "memo-retry-action-01",
+        "device_id": "memo-phone",
+        "text": "Followthrough research the GitHub repository pypa sampleproject",
+        "source": "phone",
+        "consent": True,
+    }
+    with TestClient(app) as client:
+        first = client.post("/api/v1/transcripts", headers=_auth(device_token), json=payload)
+        assert first.status_code == 202
+        first_job = first.json()["job_id"]
+
+        # New ambient context arrives after the buffer cleared.
+        client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={**payload, "event_id": "memo-ordinary-after-action", "text": "ordinary private context"},
+        )
+        retry = client.post("/api/v1/transcripts", headers=_auth(device_token), json=payload)
+
+    assert retry.status_code == 202
+    assert retry.json()["created"] is False
+    assert len(app.state.store.list_hermes_jobs()) == 1
+    assert app.state.store.list_hermes_jobs()[0]["id"] == first_job
+
+
 def test_payload_limits_fail_before_persistence(configured_settings) -> None:
     settings, _, device_token = configured_settings
     settings.max_transcript_bytes = 64

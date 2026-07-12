@@ -485,7 +485,20 @@ def create_app(config: Settings = settings) -> FastAPI:
         speaker = SpeakerContext.native_owner(principal)
         aggregate = None
         aggregator = None
-        if payload.source in {"phone", "wearable"} and not payload.metadata.get("aggregated"):
+        already_archived = archive_store.by_event(payload.event_id) is not None
+        if already_archived and payload.source in {"phone", "wearable"} and not payload.metadata.get("aggregated"):
+            # Reconstruct only a self-contained one-segment aggregate on replay.
+            # This returns the original aggregate's run/job receipt without
+            # mixing newly buffered ambient context into a second aggregate.
+            replay_aggregator = TranscriptAggregator()
+            aggregate = replay_aggregator.add(
+                Transcript(payload.event_id, _utc(payload.occurred_at), payload.text)
+            )
+            aggregator = replay_aggregator if aggregate else None
+        elif (
+            payload.source in {"phone", "wearable"}
+            and not payload.metadata.get("aggregated")
+        ):
             aggregator = application.state.transcript_aggregators.setdefault(
                 payload.device_id, TranscriptAggregator()
             )
@@ -591,18 +604,21 @@ def create_app(config: Settings = settings) -> FastAPI:
         digest = vault.digest(body)
         if x_content_sha256 and x_content_sha256.lower() != digest:
             raise HTTPException(status_code=422, detail="audio digest mismatch")
-        existing = archive_store.audio_chunk(archived["id"], sequence)
-        if existing:
-            if existing["plaintext_sha256"] != digest:
-                raise HTTPException(status_code=409, detail="audio sequence already exists with different content")
-            return {"event_id": event_id, "sequence": sequence, "plaintext_sha256": digest, "plaintext_bytes": len(body), "created": False}
         mime = content_type or "application/octet-stream"
         associated_data = f"audio:{event_id}:{sequence}:{mime}:{digest}".encode()
         try:
-            path = vault.write_audio(archived["id"], sequence, body, associated_data)
+            chunk, created = archive_store.persist_audio_chunk(
+                archived["id"],
+                sequence,
+                mime,
+                digest,
+                len(body),
+                lambda: vault.write_audio(archived["id"], sequence, body, associated_data),
+            )
         except ArchiveIntegrityError as exc:
             raise HTTPException(status_code=503, detail="archive encryption unavailable") from exc
-        _, created = archive_store.add_audio_chunk(archived["id"], sequence, str(path), mime, digest, len(body))
+        if chunk["plaintext_sha256"] != digest:
+            raise HTTPException(status_code=409, detail="audio sequence already exists with different content")
         return {"event_id": event_id, "sequence": sequence, "plaintext_sha256": digest, "plaintext_bytes": len(body), "created": created}
 
     @application.post("/api/signals")
@@ -750,8 +766,16 @@ def create_app(config: Settings = settings) -> FastAPI:
         if mime == "application/octet-stream":
             mime = "audio/L16"
         associated_data = f"audio:{event_id}:0:{mime}:{digest}".encode()
-        path = vault.write_audio(archived["id"], 0, body, associated_data)
-        _, created_chunk = archive_store.add_audio_chunk(archived["id"], 0, str(path), mime, digest, len(body))
+        chunk, created_chunk = archive_store.persist_audio_chunk(
+            archived["id"],
+            0,
+            mime,
+            digest,
+            len(body),
+            lambda: vault.write_audio(archived["id"], 0, body, associated_data),
+        )
+        if chunk["plaintext_sha256"] != digest:
+            raise HTTPException(status_code=409, detail="Omi audio idempotency key reused with different bytes")
         return {"event_id": event_id, "created": created_chunk, "archive_created": created_event, "recovered_incomplete_event": not created_event and created_chunk, "plaintext_sha256": digest, "plaintext_bytes": len(body), "sample_rate": sample_rate}
 
     @application.post("/api/webhooks/omi")
