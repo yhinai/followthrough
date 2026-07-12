@@ -36,7 +36,15 @@ def test_journey_links_one_event_from_transcript_to_phone(configured_settings) -
         app.state.store.mark_hermes_enqueued(job_id, "t_journey01")
         app.state.store.sync_hermes_job(job_id, "completed", summary="Research complete")
         app.state.store.mark_hermes_notification(job_id, "delivered")
-        assert client.get(f"/api/v1/jobs/{job_id}").status_code == 200
+        deliveries = client.get("/api/v1/devices/memo-phone/deliveries").json()
+        assert len(deliveries) == 1
+        assert (
+            client.post(
+                "/api/v1/devices/memo-phone/deliveries/ack",
+                json={"receipt_id": deliveries[0]["receipt_id"]},
+            ).status_code
+            == 200
+        )
 
         body = client.get("/api/journey").json()
 

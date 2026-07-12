@@ -574,6 +574,16 @@ class Store:
             self.db.commit()
         return cursor.rowcount == 1
 
+    def phone_delivery_for_job(self, job_id: str) -> dict[str, Any] | None:
+        """Return the durable delivery receipt for a job, if one exists."""
+
+        with self.lock:
+            row = self.db.execute(
+                "SELECT * FROM phone_deliveries WHERE job_id=? ORDER BY created_at DESC LIMIT 1",
+                (job_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def hermes_job(self, job_id: str) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM hermes_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None

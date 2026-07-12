@@ -1498,7 +1498,11 @@ def create_app(config: Settings = settings) -> FastAPI:
             session and h_state == "completed" and str(session.get("latest_answer") or "").strip()
         )
         discord_delivered = bool(job and job.get("notification_state") == "delivered")
-        returned_at = (job or {}).get("last_polled_at")
+        # Phone playback is acknowledged through the durable delivery outbox,
+        # rather than the legacy per-job polling timestamp.  Otherwise a
+        # completed H session keeps the judge-facing journey falsely "running".
+        delivery = store.phone_delivery_for_job(str(job["id"])) if job else None
+        returned_at = (delivery or {}).get("acknowledged_at") or (job or {}).get("last_polled_at")
         returned = bool(returned_at)
         failed = h_terminal and not verified
 
@@ -1631,6 +1635,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             "computer_use": session,
             "discord_delivered": discord_delivered,
             "phone_returned": returned,
+            "phone_delivery_state": (delivery or {}).get("state"),
             "elapsed_seconds": elapsed,
             "execution_seconds": execution_seconds,
             "stages": stages,
