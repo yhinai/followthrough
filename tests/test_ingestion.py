@@ -89,6 +89,53 @@ def test_phone_fragments_are_centrally_aggregated_before_dispatch(configured_set
     assert component["classification"] == "aggregate_component"
 
 
+def test_natural_search_the_web_command_creates_a_web_job(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    spoken = "Oh, search the web and figure out how much caffeine is in a Red Bull."
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-search-red-bull-0001",
+                "device_id": "memo-phone",
+                "text": spoken,
+                "source": "phone",
+                "consent": True,
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["aggregate_event_id"].startswith("adb-omi:aggregate:")
+    job = app.state.store.hermes_job_for_run(response.json()["run_id"])
+    assert job is not None
+    assert job["category"] == "web_task"
+    assert job["entity"] == spoken.rstrip(".")
+
+
+def test_book_noun_context_does_not_create_an_action(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-book-context-0001",
+                "device_id": "memo-phone",
+                "text": "This is supposed to be a book to like search to do tasks.",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "archived"
+    assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+
+
 def test_retry_of_archived_action_does_not_create_second_aggregate(configured_settings) -> None:
     settings, _, device_token = configured_settings
     settings.kanban_enabled = True

@@ -35,6 +35,16 @@ def test_aggregates_split_explicit_research_command() -> None:
     assert result.text == "Followthrough, please research the GitHub repository pypa sampleproject"
 
 
+def test_aggregates_search_the_web_with_natural_connector_words() -> None:
+    aggregator = TranscriptAggregator(window_seconds=45)
+    result = aggregator.add(
+        segment(1, "Oh, search the web and figure out how much caffeine is in a Red Bull."),
+        monotonic_at=1,
+    )
+    assert result is not None
+    assert result.text == "Oh, search the web and figure out how much caffeine is in a Red Bull."
+
+
 def test_does_not_aggregate_ordinary_or_passive_tool_conversation() -> None:
     aggregator = TranscriptAggregator(window_seconds=45)
     assert aggregator.add(segment(1, "The pizza was good"), monotonic_at=1) is None

@@ -21,13 +21,13 @@ WHISPER = re.compile(
     r"\[OnDeviceWhisper\]\s+Transcribed\s+.*?\s+Text:\s*(?P<text>.+?)\s*$"
 )
 ACTION = re.compile(
-    r"\b(research|investigate|test|evaluate|clone|check|find|look[ -]?up|benchmark|"
+    r"\b(research|search|investigate|test|evaluate|clone|check|find|look[ -]?up|benchmark|"
     r"remind|schedule|add|send|message|email|deploy|purchase|buy)\b",
     re.I,
 )
 SUBJECT = re.compile(
     r"\b(github|repo(?:sitory)?|tool|framework|library|sdk|api|startup|company|"
-    r"event|calendar|meeting|task|todo|to-do|hermes|agent|automation)\b|"
+    r"event|calendar|meeting|task|todo|to-do|hermes|agent|automation|web|internet|online)\b|"
     r"(?:https?://)?github\.com/[\w.-]+/[\w.-]+",
     re.I,
 )

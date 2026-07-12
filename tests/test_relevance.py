@@ -295,3 +295,40 @@ def test_spoken_web_command_is_classified_as_web_task():
     )
     assert commodity.primary_category == Category.WEB_TASK
     assert commodity.dispatch_allowed is True
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "Search the web for how much caffeine is in a Red Bull.",
+        "Oh, search the web and figure out how much caffeine is in a Red Bull.",
+        "Search online and tell me how much caffeine is in a Red Bull.",
+        "Research how much caffeine is in a Red Bull.",
+        "Look up how much caffeine is in a Red Bull.",
+    ],
+)
+def test_search_and_research_phrasings_are_web_tasks(spoken: str) -> None:
+    result = evaluate_relevance(spoken, NATIVE_OWNER)
+    assert result.primary_category == Category.WEB_TASK
+    assert result.dispatch_allowed is True
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "This is supposed to be a book to like search to do tasks.",
+        "That book was interesting.",
+        "I read a book about flights.",
+        "The research paper was interesting.",
+    ],
+)
+def test_book_and_research_noun_contexts_are_not_web_tasks(spoken: str) -> None:
+    result = evaluate_relevance(spoken, NATIVE_OWNER)
+    assert result.primary_category != Category.WEB_TASK
+    assert result.dispatch_allowed is False
+
+
+@pytest.mark.parametrize("fragment", ["Please research", "Please research the"])
+def test_incomplete_research_fragment_waits_for_its_object(fragment: str) -> None:
+    result = evaluate_relevance(fragment, NATIVE_OWNER)
+    assert result.dispatch_allowed is False

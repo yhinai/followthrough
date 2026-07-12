@@ -332,17 +332,34 @@ _RULES: tuple[_Rule, ...] = (
         "web_task.command",
         Category.WEB_TASK,
         _rx(
-            r"\b(?:book|reserve|order|purchase|add\s+to\s+cart|"
+            r"\b(?:book\s+(?!is\b|was\b|about\b|to\b|that\b|which\b)"
+            r"(?:me\s+)?(?:(?:a|an|the|my|our|this|that)\s+)?"
+            r"(?:\w+[ -]+){0,4}(?:flight|hotel|room|table|ticket|appointment|"
+            r"meeting|reservation|trip|travel|restaurant|venue)\b|"
+            r"reserve|order|purchase|add\s+to\s+cart|"
             r"buy\s+(?:me\s+)?(?:a|an|the|some)\b|"
             r"check\b.{0,48}\b(?:price|cost|availability|stock)|(?:price|cost)\s+(?:of|for|watch|check)|"
             r"(?:what(?:'s| is)|how\s+much\s+is)\b.{0,48}\b(?:price|cost)|"
             r"how\s+much\s+is\s+(?:gold|silver|bitcoin|ethereum)\b|"
             r"fill\s+(?:out|in)|sign\s+(?:me\s+)?up\s+for|apply\s+(?:to|for)|"
             r"find\s+(?:me\s+)?(?:a|an|the|the\s+cheapest|cheap)\b|"
-            r"search\s+(?:the\s+web|online)\s+for)\b"
+            r"search\s+(?:(?:the\s+)?(?:web|internet)\b|online\b|(?:for|about)\b)|"
+            r"look[ -]?up\b)"
         ),
         0.94,
         "Recognized a web task the computer-use agent can run",
+    ),
+    _Rule(
+        "web_task.research",
+        Category.WEB_TASK,
+        _rx(
+            r"\bresearch\s+"
+            r"(?!(?:is|was|were|has|shows|showed|suggests|paper|study)\b)"
+            r"(?:(?:this|that|the|a|an|my|our)\s+)?"
+            r"(?!(?:this|that|the|a|an|my|our)\b)\S+"
+        ),
+        0.94,
+        "Recognized an explicit research request",
     ),
     _Rule(
         "tool.software",
@@ -528,6 +545,16 @@ def _category_evidence(clean: str) -> tuple[tuple[Category, ...], tuple[Evidence
             matched.setdefault(rule.category, []).append(
                 Evidence(rule.rule_id, rule.category, rule.confidence, rule.explanation)
             )
+    # Generic "research this SDK/startup/repository" should retain its more
+    # specific specialist category. Explicit search/look-up language remains a
+    # web task even when the query also names a tool.
+    web_evidence = matched.get(Category.WEB_TASK, [])
+    if (
+        web_evidence
+        and all(item.rule_id == "web_task.research" for item in web_evidence)
+        and any(category != Category.WEB_TASK for category in matched)
+    ):
+        matched.pop(Category.WEB_TASK)
     categories = tuple(category for category in CATEGORY_ORDER if category in matched)
     evidence = tuple(item for category in categories for item in matched[category])
     return categories, evidence
