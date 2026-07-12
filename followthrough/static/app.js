@@ -168,6 +168,16 @@ function formatAgentAnswer(value) {
     if (bullets.length) { html.push(`<ul>${bullets.join("")}</ul>`); bullets = []; }
   };
   for (const line of lines) {
+    if (/^#{1,6}\s+/.test(line)) {
+      // The agent sometimes answers with markdown headings.
+      flush();
+      html.push(`<p class="answer-head">${line.replace(/^#{1,6}\s+/, "")}</p>`);
+      continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      bullets.push(`<li>${line.replace(/^\d+\.\s+/, "")}</li>`);
+      continue;
+    }
     if (/^[-*\u2022\u00b7]\s+/.test(line)) {
       bullets.push(`<li>${line.replace(/^[-*\u2022\u00b7]\s+/, "")}</li>`);
     } else {
