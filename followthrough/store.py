@@ -168,6 +168,15 @@ class Store:
         ).fetchone()
         return dict(row) if row else None
 
+    def unfinished_computer_sessions(self) -> list[dict[str, Any]]:
+        """Sessions a restart orphaned: still open, and the agent kept working."""
+        rows = self.db.execute(
+            "SELECT * FROM computer_use_sessions "
+            "WHERE state NOT IN ('completed','failed','timed_out','interrupted','configuration_required') "
+            "ORDER BY created_at"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_computer_sessions(self, limit: int = 30) -> list[dict[str, Any]]:
         return [
             dict(row)

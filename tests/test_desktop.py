@@ -57,9 +57,9 @@ async def test_local_plane_is_preferred_and_click_verifies_visual_change(tmp_pat
     router = DesktopRouter(Store(settings.db_path), settings, httpx.MockTransport(handler))
     doctor = await router.doctor()
     assert doctor["ready"] is True
-    assert doctor["provider"] == "orgo-local"
+    assert doctor["provider"] == "spark-local"
     receipt = await router.click(20, 30)
-    assert receipt["provider"] == "orgo-local"
+    assert receipt["provider"] == "spark-local"
     assert receipt["visual_changed"] is True
     assert receipt["noop"] is False
     assert router.store.list_desktop_actions()[0]["action"] == "click"

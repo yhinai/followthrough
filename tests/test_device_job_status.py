@@ -85,3 +85,54 @@ def test_completed_web_task_returns_the_computer_use_answer(configured_settings)
         body = client.get(f"/api/v1/jobs/{job_id}").json()
         assert body["summary"] == "RTX 5080 starts at $1,256.99."
         assert body["computer_use"]["state"] == "completed"
+
+
+def test_running_web_task_does_not_speak_a_stale_worker_summary(configured_settings) -> None:
+    settings, _, _ = configured_settings
+    settings.kanban_enabled = True
+    app = create_app(settings)
+    with TestClient(app) as client:
+        accepted = client.post(
+            "/api/v1/transcripts",
+            json={
+                "event_id": "web-inflight-01",
+                "device_id": "memo-phone",
+                "source": "phone",
+                "consent": True,
+                "text": "Check the price of an RTX 5080 on Newegg",
+            },
+        )
+        job_id = accepted.json()["job_id"]
+        session_id = accepted.json()["computer_use_id"]
+
+        # The research worker finishes first with a guess; the agent is still live.
+        app.state.store.update_run(
+            app.state.store.hermes_job(job_id)["run_id"],
+            summary="Status: unable to verify a live price.",
+        )
+        app.state.store.update_computer_session(session_id, state="running", step_count=7)
+
+        body = client.get(f"/api/v1/jobs/{job_id}").json()
+        assert body["state"] == "in_progress"
+        assert body["summary"] is None
+        assert body["computer_use"]["state"] == "running"
+
+
+def test_restart_resumes_an_orphaned_computer_use_session(configured_settings) -> None:
+    settings, _, _ = configured_settings
+    app = create_app(settings)
+    store = app.state.store
+    session = store.create_computer_session(task="check a price", agent="h/web-surfer-flash")
+    store.update_computer_session(session["id"], state="running", h_session_id="h-123")
+
+    assert [row["id"] for row in store.unfinished_computer_sessions()] == [session["id"]]
+
+    resumed: list[str] = []
+
+    async def fake_resume(identifier: str) -> None:
+        resumed.append(identifier)
+
+    app.state.h_executor.resume = fake_resume
+    with TestClient(app):
+        pass
+    assert resumed == [session["id"]]

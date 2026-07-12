@@ -23,7 +23,7 @@ from .classifier import Classification
 from .config import Settings, settings
 from .controls import Capability, ControlPlane
 from .desktop import DesktopError, DesktopRouter
-from .hcompany import HCompanyExecutor
+from .hcompany import TERMINAL_STATES as H_TERMINAL_STATES, HCompanyExecutor
 from .integrations import operational_entity
 from .models import (
     CapabilityControlIn,
@@ -257,6 +257,13 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # A restart kills the tasks watching live H sessions, but the sessions
+        # themselves keep running. Re-attach so their answers still reach the
+        # phone instead of leaving the job pending forever.
+        for orphan in store.unfinished_computer_sessions():
+            task = asyncio.create_task(h_executor.resume(orphan["id"]))
+            application.state.background_tasks.add(task)
+            task.add_done_callback(application.state.background_tasks.discard)
         yield
 
     application = FastAPI(
@@ -290,9 +297,18 @@ def create_app(config: Settings = settings) -> FastAPI:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), geolocation=(), payment=()"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
-        )
+        if request.url.path.startswith("/novnc/"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; "
+                "object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+                "img-src 'self' data:; media-src 'self'; object-src 'none'; "
+                "base-uri 'none'; frame-ancestors 'none'"
+            )
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
@@ -984,13 +1000,20 @@ def create_app(config: Settings = settings) -> FastAPI:
         # worker. Its answer is the ground truth for this job, so it wins over a
         # worker summary that could only guess at the live page.
         session = store.computer_session_for_event(job["event_id"])
-        if session and session.get("state") == "completed" and session.get("latest_answer"):
-            summary = session["latest_answer"]
+        state = job["state"]
+        if session:
+            if session.get("state") == "completed" and session.get("latest_answer"):
+                summary = session["latest_answer"]
+            elif session["state"] not in H_TERMINAL_STATES:
+                # The agent that owns this task is still working. Report it as
+                # in progress rather than speaking the research worker's guess.
+                state = "in_progress"
+                summary = None
         return {
             "job_id": job["id"],
             "run_id": job["run_id"],
             "task_id": job.get("task_id"),
-            "state": job["state"],
+            "state": state,
             "category": job.get("category"),
             "entity": job.get("entity"),
             "summary": summary,

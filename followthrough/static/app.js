@@ -129,13 +129,13 @@ function renderDesktop(doctor, actions) {
   state.className = `desktop-state ${doctor.ready ? "online" : "offline"}`;
   state.innerHTML = `<i></i>${doctor.ready ? "Live" : "Not configured"}`;
   $("#desktopProvider").textContent = doctor.provider || doctor.prefer || "Unavailable";
-  $("#desktopComputer").textContent = doctor.computer_id ? doctor.computer_id.slice(0, 12) : (doctor.provider === "orgo-local" ? "This computer" : "—");
+  $("#desktopComputer").textContent = doctor.computer_id ? doctor.computer_id.slice(0, 12) : (doctor.provider === "spark-local" ? "This computer" : "—");
   $("#desktopRoute").textContent = doctor.ready ? `${label(doctor.provider)} · automatic` : "Automatic routing";
   const shot = doctor.screenshot || {};
   $("#desktopResolution").textContent = shot.width ? `${shot.width} × ${shot.height}` : "—";
   if (doctor.ready) {
     empty.hidden = true;
-    if (doctor.provider === "orgo-local") {
+    if (doctor.provider === "spark-local") {
       frame.hidden = true; live.hidden = false;
       if (!live.src) live.src = "/novnc/vnc_lite.html?autoconnect=true&resize=scale&path=api/desktop/vnc";
     } else {

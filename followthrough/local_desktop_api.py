@@ -103,9 +103,25 @@ def _press_keysym(connection: display.Display, name: str, *, shifted: bool = Fal
         xtest.fake_input(connection, X.KeyRelease, shift)
 
 
+_SHIFTED_CHARACTERS = {
+    "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6",
+    "&": "7", "*": "8", "(": "9", ")": "0", "_": "minus", "+": "equal",
+    "{": "bracketleft", "}": "bracketright", "|": "backslash", ":": "semicolon",
+    '"': "apostrophe", "<": "comma", ">": "period", "?": "slash", "~": "grave",
+}
+
+
+def _type_character(connection: display.Display, character: str) -> None:
+    if character in _SHIFTED_CHARACTERS:
+        _press_keysym(connection, _SHIFTED_CHARACTERS[character], shifted=True)
+    elif character == " ":
+        _press_keysym(connection, "space")
+    else:
+        _press_keysym(connection, character.lower(), shifted=character.isupper())
+
+
 @app.get("/health")
-def health(authorization: str | None = Header(default=None)) -> dict[str, object]:
-    _authorize(authorization)
+def health() -> dict[str, object]:
     try:
         with _display() as connection:
             geometry = connection.screen().root.get_geometry()
@@ -173,8 +189,7 @@ def type_text(payload: TypeText, authorization: str | None = Header(default=None
             elif character == "\t":
                 _press_keysym(connection, "Tab")
             else:
-                lower = character.lower()
-                _press_keysym(connection, lower, shifted=character.isupper())
+                _type_character(connection, character)
             connection.sync()
             if payload.delay_ms:
                 time.sleep(payload.delay_ms / 1000)
@@ -185,6 +200,8 @@ def type_text(payload: TypeText, authorization: str | None = Header(default=None
 def key(payload: Key, authorization: str | None = Header(default=None)) -> dict[str, bool]:
     _authorize(authorization)
     parts = [part.strip() for part in payload.key.replace("+", " ").split() if part.strip()]
+    if not parts:
+        raise HTTPException(status_code=422, detail="key chord is empty")
     modifiers = {"CTRL": "Control_L", "CONTROL": "Control_L", "ALT": "Alt_L", "SHIFT": "Shift_L", "META": "Super_L", "SUPER": "Super_L"}
     with _display() as connection:
         held: list[int] = []

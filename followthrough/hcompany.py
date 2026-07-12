@@ -84,8 +84,6 @@ class HCompanyExecutor:
             return
 
         session_id = ""
-        cursor = 0
-        step_count = 0
         try:
             async with httpx.AsyncClient(
                 base_url=self.settings.h_api_base.rstrip("/"),
@@ -115,7 +113,28 @@ class HCompanyExecutor:
                     current_action="H Company browser session created",
                 )
                 await self.publish("computer_use_started", row)
+            await self._watch(identifier, session_id, 0)
+        except Exception as exc:
+            row = self.store.update_computer_session(
+                identifier,
+                state="failed",
+                current_action="H Company session failed",
+                error=f"{type(exc).__name__}: {str(exc)[:350]}",
+                finished_at=datetime.now(UTC).isoformat(),
+            )
+            await self.publish("computer_use_failed", row)
 
+    async def _watch(self, identifier: str, session_id: str, step_count: int) -> None:
+        """Follow an existing H session to its terminal state."""
+        cursor = 0
+        row = self.store.computer_session(identifier) or {}
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.settings.h_api_base.rstrip("/"),
+                headers=self._headers(),
+                timeout=httpx.Timeout(30.0, read=40.0),
+                transport=self.transport,
+            ) as client:
                 while True:
                     changes = await client.get(
                         f"/sessions/{session_id}/changes",
@@ -170,6 +189,26 @@ class HCompanyExecutor:
                 finished_at=datetime.now(UTC).isoformat(),
             )
             await self.publish("computer_use_failed", row)
+
+    async def resume(self, identifier: str) -> None:
+        """Re-attach to a session that outlived the process that started it.
+
+        The H session keeps running server-side, so after a restart we resume
+        watching it instead of leaving the owner with a permanently pending job.
+        """
+        row = self.store.computer_session(identifier)
+        if not row:
+            return
+        session_id = row.get("h_session_id")
+        if not session_id:
+            self.store.update_computer_session(
+                identifier,
+                state="failed",
+                error="session was interrupted before it reached H Company",
+                finished_at=datetime.now(UTC).isoformat(),
+            )
+            return
+        await self._watch(identifier, str(session_id), int(row.get("step_count") or 0))
 
     async def cancel(self, identifier: str) -> dict[str, Any]:
         row = self.store.computer_session(identifier)

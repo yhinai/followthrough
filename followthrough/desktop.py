@@ -100,7 +100,7 @@ class DesktopRouter:
         health = await self._local_health()
         if health and self.local_token:
             return DesktopTarget(
-                "orgo-local", None, self.settings.orgo_local_base.rstrip("/"), self.local_token
+                "spark-local", None, self.settings.orgo_local_base.rstrip("/"), self.local_token
             )
         if self.settings.orgo_api_key and self.settings.orgo_default_computer_id:
             return DesktopTarget(
@@ -117,7 +117,7 @@ class DesktopRouter:
 
     @staticmethod
     def _path(target: DesktopTarget, action: str) -> str:
-        if target.provider == "orgo-local":
+        if target.provider == "spark-local":
             return f"/{action}"
         return f"/computers/{target.computer_id}/{action}"
 

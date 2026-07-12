@@ -7,7 +7,7 @@ mkdir -p "$profile"
 
 cleanup() {
   trap - EXIT INT TERM
-  kill "${vnc_pid:-}" "${browser_pid:-}" "${xvfb_pid:-}" 2>/dev/null || true
+  kill "${vnc_pid:-}" "${browser_pid:-}" "${wm_pid:-}" "${xvfb_pid:-}" 2>/dev/null || true
   wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -19,13 +19,17 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
+DISPLAY="$display" openbox --sm-disable &
+wm_pid=$!
+sleep 0.5
+
 DISPLAY="$display" /snap/bin/chromium \
-  --no-sandbox --disable-gpu --disable-dev-shm-usage --disable-software-rasterizer \
-  --disable-session-crashed-bubble --no-first-run --start-maximized --kiosk \
-  --user-data-dir="$profile" about:blank &
+  --no-sandbox --disable-gpu --disable-dev-shm-usage \
+  --disable-session-crashed-bubble --no-first-run --start-maximized \
+  --user-data-dir="$profile" https://example.com &
 browser_pid=$!
 
 x11vnc -display "$display" -rfbport 5901 -localhost -forever -shared -nopw -quiet &
 vnc_pid=$!
 
-wait -n "$xvfb_pid" "$browser_pid" "$vnc_pid"
+wait -n "$xvfb_pid" "$wm_pid" "$browser_pid" "$vnc_pid"
