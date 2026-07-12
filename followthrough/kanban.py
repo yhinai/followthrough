@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -343,40 +344,36 @@ class HermesKanbanClient:
             "A separate deterministic service owns repository acquisition and sandboxing. Return cited findings, "
             "clearly mark missing runner evidence, and propose a safe typed next action."
         )
-        value = self._run(
-            [
-                "kanban",
-                "--board",
-                BOARD,
-                "create",
-                f"Research captured signal {short_id}",
-                "--body",
-                body,
-                "--assignee",
-                WORKER_PROFILE,
-                "--workspace",
-                "scratch",
-                "--tenant",
-                "followthrough",
-                "--priority",
-                "50",
-                "--idempotency-key",
-                idempotency_key,
-                "--max-runtime",
-                "20m",
-                "--max-retries",
-                "3",
-                "--goal",
-                "--goal-max-turns",
-                "6",
-                "--created-by",
-                "followthrough",
-                "--skill",
-                "followthrough-operator",
-                "--json",
-            ],
-            expect_json=True,
-        )
+        command = [
+            "kanban",
+            "--board",
+            BOARD,
+            "create",
+            f"Research captured signal {short_id}",
+            "--body",
+            body,
+            "--assignee",
+            "none" if capsule.category == "web_task" else WORKER_PROFILE,
+            "--workspace",
+            "scratch",
+            "--tenant",
+            "followthrough",
+            "--priority",
+            "50",
+            "--idempotency-key",
+            idempotency_key,
+            "--max-runtime",
+            "20m",
+            "--max-retries",
+            "3",
+        ]
+        if capsule.category != "web_task":
+            command.extend(["--goal", "--goal-max-turns", "6"])
+        command.extend(["--created-by", "followthrough"])
+        if capsule.category != "web_task":
+            command.extend(["--skill", "followthrough-operator"])
+        command.append("--json")
+        value = self._run(command, expect_json=True)
         payload = _object(value, "task", "item", "data")
         raw_task_id = payload.get("id", payload.get("task_id"))
         task_id = _opaque_id(raw_task_id, name="task_id")
@@ -403,6 +400,46 @@ class HermesKanbanClient:
             expect_json=True,
         )
         return _records(value, "runs", "items", "data")
+
+    def complete_from_runner(
+        self,
+        task_id: str,
+        *,
+        result: str,
+        runner: str,
+        receipt_url: str | None = None,
+    ) -> Mapping[str, Any]:
+        """Close a Hermes card from an authoritative typed runner receipt."""
+
+        safe_task_id = _opaque_id(task_id, name="task_id")
+        safe_result = _sanitize_summary(result)
+        if not safe_result:
+            raise ValueError("runner result is empty")
+        safe_url = str(receipt_url or "")
+        if safe_url and not safe_url.startswith("https://"):
+            safe_url = ""
+        self._run(
+            [
+                "kanban", "--board", BOARD, "reassign", safe_task_id, "none",
+                "--reclaim", "--reason", "authoritative_runner_completed",
+            ],
+            expect_json=False,
+        )
+        metadata = json.dumps(
+            {"runner": _safe_token(runner), "receipt_url": safe_url[:500]},
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        self._run(
+            [
+                "kanban", "--board", BOARD, "complete", safe_task_id,
+                "--result", safe_result, "--summary", safe_result,
+                "--metadata", metadata,
+            ],
+            expect_json=False,
+        )
+        return self.show_task(safe_task_id)
 
     def diagnostics(self, task_id: str) -> JsonValue:
         safe_task_id = _opaque_id(task_id, name="task_id")
@@ -501,6 +538,19 @@ def _latest_summary(runs: Sequence[Mapping[str, Any]] | None) -> str | None:
         return None
     sanitized = _sanitize_summary(summary)
     return sanitized or None
+
+
+def _discord_summary(value: object, limit: int = 850) -> str:
+    """Bound a result at a readable Markdown boundary, never mid-link/word."""
+
+    clean = _sanitize_summary(str(value or "Completed successfully.")) or "Completed successfully."
+    if len(clean) <= limit:
+        return clean
+    window = clean[:limit]
+    boundary = max(window.rfind("\n\n"), window.rfind(". "), window.rfind("\n"))
+    if boundary < limit // 2:
+        boundary = window.rfind(" ")
+    return f"{window[:max(1, boundary)].rstrip(' .,:;-')}…"
 
 
 def _diagnostic_codes(diagnostics: JsonValue | None) -> tuple[str, ...]:
@@ -779,6 +829,29 @@ class DurableOrchestrator:
             try:
                 run_id = _opaque_id(row.get("run_id"), name="run_id")
                 task_id = _opaque_id(row.get("task_id"), name="task_id")
+                if row.get("category") == "web_task":
+                    session_lookup = getattr(self.store, "computer_session_for_event", None)
+                    session = (
+                        session_lookup(str(row.get("event_id") or ""))
+                        if callable(session_lookup)
+                        else None
+                    )
+                    if (
+                        session
+                        and session.get("state") == "completed"
+                        and str(session.get("latest_answer") or "").strip()
+                    ):
+                        current = self.client.show_task(task_id)
+                        current_status = _safe_token(
+                            current.get("status", current.get("state", "unknown"))
+                        )
+                        if current_status not in {"done", "completed", "complete"}:
+                            self.client.complete_from_runner(
+                                task_id,
+                                result=str(session["latest_answer"]),
+                                runner="h-company",
+                                receipt_url=str(session.get("agent_view_url") or "") or None,
+                            )
                 task = self.client.show_task(task_id)
                 runs = self.client.task_runs(task_id)
                 diagnostics = self.client.diagnostics(task_id)
@@ -855,18 +928,39 @@ class DurableOrchestrator:
         task_id = _opaque_id(row.get("task_id"), name="task_id")
         chat_id = _opaque_id(row.get("discord_chat_id"), name="discord_chat_id")
         entity = str(row.get("entity") or "Completed Followthrough task")[:300]
-        summary = str(row.get("result_summary") or "Completed successfully.")[:1_350]
+        summary = _discord_summary(row.get("result_summary"))
+        steps = max(0, int(row.get("computer_steps") or 0))
+        duration = None
+        if row.get("computer_started_at") and row.get("computer_finished_at"):
+            duration = max(
+                0,
+                round(
+                    (
+                        datetime.fromisoformat(str(row["computer_finished_at"]))
+                        - datetime.fromisoformat(str(row["computer_started_at"]))
+                    ).total_seconds()
+                ),
+            )
+        proof = ""
+        if steps or duration is not None:
+            facts = [f"{steps} H steps"] if steps else []
+            if duration is not None:
+                facts.append(f"{duration}s")
+            proof = f"\n\nCompleted: {' · '.join(facts)}"
+        replay = str(row.get("computer_replay_url") or "")
+        if replay.startswith("https://"):
+            proof += f"\nH session: {replay[:500]}"
         request = DiscordMessageRequest(
             kind=EffectKind.DISCORD_MESSAGE_SEND,
             trigger_event_id=event_id,
             target=f"discord:{chat_id}",
             subject="Followthrough · completed",
-            body=f"**{entity}**\n\n{summary}\n\nHermes receipt: `{task_id}`",
+            body=f"**{entity}**\n\n{summary}{proof}\n\nHermes receipt: `{task_id}`",
             owner_only=True,
         )
         record = self.effect_service.submit(
             request,
-            idempotency_key=f"followthrough:{event_id}:result:discord:v1",
+            idempotency_key=f"followthrough:{event_id}:result:discord:v2",
             execute=True,
         )
         if record.get("state") != EffectState.COMPLETED.value:

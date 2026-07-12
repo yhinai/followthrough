@@ -84,3 +84,30 @@ def test_needs_attention_is_not_rendered_as_active_work():
 
     assert '"failed", "needs_attention"' in js
     assert '"failed","needs_attention"' in js
+
+
+def test_journey_uses_one_server_linked_contract() -> None:
+    html = HTML.read_text()
+    js = JS.read_text()
+
+    assert 'safeJson("/api/journey"' in js
+    assert "function renderJourney(journey)" in js
+    assert "activity.find" not in js
+    for label in ("Heard", "Relevant", "Delegated", "Browsing", "Verified", "Discord", "Phone"):
+        assert f"<li>{label}</li>" in html
+
+
+def test_workspace_is_a_third_responsive_editable_view() -> None:
+    html = HTML.read_text()
+    js = JS.read_text()
+    css = CSS.read_text()
+
+    assert 'id="tabWorkspace"' in html
+    assert 'id="workspaceView"' in html
+    for group in ("Research", "Backlog", "Tasks & reminders", "Events & calendar"):
+        assert group in html
+    assert 'safeJson("/api/workspace"' in js
+    assert 'method:"PATCH"' in js
+    assert 'method:"DELETE"' in js
+    assert ".workspace-board" in css
+    assert "@media(max-width:700px)" in css

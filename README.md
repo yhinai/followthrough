@@ -2,6 +2,13 @@
 
 Followthrough is an always-on personal ambient operator. Memo Android captures continuously, the local archive keeps every transcript and audio chunk as plain files and SQLite rows, deterministic relevance promotes only useful speech, and a Hermes worker researches or proposes typed actions with durable receipts. The channel is bidirectional: Memo streams interim words to the live transcript view, persists job IDs across restarts, and returns every completed result to the owner's Discord DM. Its `Discord + voice` mode also speaks the same verified result through the phone's built-in loudspeaker.
 
+Followthrough is the web product and Spark runtime; Memo is the Android capture
+companion and wake phrase. An explicit “Memo, …” command always creates work.
+Passive tool, startup, and goal mentions enter the editable Workspace Backlog,
+while ordinary conversation remains only in the complete archive. H Company is
+the single browser executor for web tasks; Hermes owns the durable task and
+delivery lifecycle and closes from the authoritative H receipt.
+
 This is a testing / proof-of-concept build: no authentication, no encryption, no backups — just the core flow.
 
 ## Run
@@ -13,6 +20,12 @@ uv pip install --python .venv/bin/python -e '.[dev]'
 ```
 
 Open `http://localhost:18765/` for the live dashboard or `http://localhost:18765/#transcript` for the word-streaming view. Ordinary chatter is archived and never enters Hermes memory or an action queue; only relevant signals become durable Hermes jobs. Reversible private actions run automatically, while external/high-risk writes stay policy-gated.
+
+The Overview is backed by one event-linked `/api/journey` contract rather than
+independent dashboard guesses. It follows a request through **Heard → Relevant
+→ Delegated → Browsing → Verified → Discord → Phone**, including the relevance
+reason and confidence, H Company step count/replay, elapsed time, and the actual
+delivery state on each output surface.
 
 The fast path is local and deterministic — archive, relevance, repository scanning/sandboxing, emergency controls, and typed receipts use no LLM call. Hermes runs only after a relevant signal crosses the gate.
 
@@ -28,6 +41,9 @@ The fast path is local and deterministic — archive, relevance, repository scan
 | Emergency controls | `followthrough/controls.py` ([docs/EMERGENCY_CONTROLS.md](docs/EMERGENCY_CONTROLS.md)) |
 | Phone bridge | `followthrough/adb_bridge.py`, `scripts/followthrough-adb-bridge.py` |
 | Live desktop control | `followthrough/desktop.py`, `/api/desktop/*`, dashboard live viewer |
+| Unified live journey | `/api/journey`, `followthrough/static/app.js` |
+| Ambient relevance eval | `tests/test_ambient_eval.py` |
+| Daily workspace | `/api/workspace`, `#workspace` |
 
 ## Free Spark desktop control
 

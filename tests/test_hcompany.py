@@ -29,6 +29,15 @@ def test_step_count_never_regresses_when_settled_snapshot_is_smaller() -> None:
     assert _step_count({"steps": ["one", "two"]}, 10) == 10
 
 
+def test_price_lookup_instruction_stops_after_first_verified_result() -> None:
+    from followthrough.hcompany import _bounded_agent_task
+
+    prompt = _bounded_agent_task("Check the RTX 5080 price on Best Buy")
+    assert "Stop as soon as one current result" in prompt
+    assert "do not exhaustively compare" in prompt
+    assert _bounded_agent_task("Book a flight to Tokyo") == "Book a flight to Tokyo"
+
+
 @pytest.mark.asyncio
 async def test_missing_key_settles_as_configuration_required(tmp_path: Path) -> None:
     settings = configured(tmp_path)
@@ -98,3 +107,50 @@ async def test_session_progress_and_agent_view_are_persisted(tmp_path: Path) -> 
     assert settled["step_count"] == 3
     assert settled["latest_answer"] == "The browser task completed."
     assert events == ["computer_use_started", "computer_use_progress", "computer_use_completed"]
+
+
+@pytest.mark.asyncio
+async def test_session_watch_recovers_from_bounded_transient_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = configured(tmp_path, key="h-test-key")
+    store = Store(settings.db_path)
+    events: list[str] = []
+    changes_calls = 0
+
+    async def publish(kind: str, payload: dict) -> None:
+        events.append(kind)
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("followthrough.hcompany.asyncio.sleep", no_wait)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal changes_calls
+        if request.method == "POST" and request.url.path.endswith("/sessions"):
+            return httpx.Response(200, json={"id": "h-retry-1", "status": "pending"})
+        if request.url.path.endswith("/changes"):
+            changes_calls += 1
+            if changes_calls == 1:
+                return httpx.Response(503, json={"error": "temporary"})
+            return httpx.Response(
+                200,
+                json={"status": "completed", "new_events": [], "answer": "Recovered.", "step_count": 2},
+            )
+        if request.method == "GET" and request.url.path.endswith("/sessions/h-retry-1"):
+            return httpx.Response(
+                200,
+                json={"id": "h-retry-1", "status": "completed", "latest_answer": "Recovered.", "step_count": 2},
+            )
+        raise AssertionError(request.url)
+
+    row = store.create_computer_session(task="Check a price online", agent=settings.h_agent)
+    executor = HCompanyExecutor(store, settings, publish, httpx.MockTransport(handler))
+    await executor.run(row["id"], row["task"])
+
+    settled = store.computer_session(row["id"])
+    assert changes_calls == 2
+    assert settled["state"] == "completed"
+    assert settled["latest_answer"] == "Recovered."
+    assert events.count("computer_use_progress") == 2

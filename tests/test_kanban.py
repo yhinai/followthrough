@@ -188,6 +188,57 @@ def test_create_goal_uses_supplied_supersession_idempotency_key(tmp_path: Path) 
     assert receipt.idempotency_key == key
 
 
+def test_web_task_card_waits_for_the_single_typed_h_runner(tmp_path: Path) -> None:
+    path = CapsuleWriter(tmp_path).write(
+        TaskCapsule(
+            "run-web", "archive-web", "web_task", "gold price", "track H", ("receipt",)
+        )
+    )
+    runner = FakeRunner([completed('{"id":"task-web","status":"ready"}')])
+    client = HermesKanbanClient(runner=runner)
+
+    client.create_goal_card(run_id="run-web", archive_id="archive-web", capsule_path=path)
+
+    argv = runner.calls[0][0]
+    assert argv[argv.index("--assignee") + 1] == "none"
+    assert "--goal" not in argv
+    assert "--skill" not in argv
+
+
+def test_complete_from_runner_reclaims_then_closes_with_receipt() -> None:
+    runner = FakeRunner(
+        [
+            completed("reassigned\n"),
+            completed("completed\n"),
+            completed('{"task":{"id":"task-8","status":"done"}}'),
+        ]
+    )
+    client = HermesKanbanClient(runner=runner)
+
+    task = client.complete_from_runner(
+        "task-8",
+        result="Verified price from the H Company session.",
+        runner="h-company",
+        receipt_url="https://platform.hcompany.ai/agents/sessions/demo",
+    )
+
+    assert task["status"] == "done"
+    reassign = runner.calls[0][0]
+    assert reassign[3:] == [
+        "kanban", "--board", "followthrough", "reassign", "task-8", "none",
+        "--reclaim", "--reason", "authoritative_runner_completed",
+    ]
+    complete_call = runner.calls[1][0]
+    assert complete_call[3:8] == [
+        "kanban", "--board", "followthrough", "complete", "task-8",
+    ]
+    metadata = json.loads(complete_call[complete_call.index("--metadata") + 1])
+    assert metadata == {
+        "receipt_url": "https://platform.hcompany.ai/agents/sessions/demo",
+        "runner": "h-company",
+    }
+
+
 def test_inspection_commands_are_json() -> None:
     runner = FakeRunner(
         [
@@ -317,6 +368,10 @@ class FakeStore:
                 "event_id": "event-12345678",
                 "entity": "Gold price today",
                 "result_summary": "Gold price research completed.",
+                "computer_steps": 9,
+                "computer_started_at": "2026-07-12T20:00:00+00:00",
+                "computer_finished_at": "2026-07-12T20:00:42+00:00",
+                "computer_replay_url": "https://platform.hcompany.ai/agents/sessions/demo",
             }
         ]
         self.active_rows: list[Mapping[str, object]] = [
@@ -489,7 +544,9 @@ def test_completed_result_is_sent_to_discord_through_typed_effector(tmp_path: Pa
     assert request.target == "discord:12345"
     assert request.body.startswith("**Gold price today**")
     assert "Gold price research completed." in request.body
-    assert idempotency_key == "followthrough:event-12345678:result:discord:v1"
+    assert "Completed: 9 H steps · 42s" in request.body
+    assert "https://platform.hcompany.ai/agents/sessions/demo" in request.body
+    assert idempotency_key == "followthrough:event-12345678:result:discord:v2"
     assert execute is True
     assert store.notified == [("run-1", {"effect_id": "unknown", "state": "delivered"})]
 
@@ -654,3 +711,14 @@ def test_latest_summary_strips_ansi_and_control_characters() -> None:
     assert _latest_summary(runs) == "Research complete"
     # A summary that is only control noise sanitizes to nothing, not a blank.
     assert _latest_summary([{"summary": "\x1b[0m\x00"}]) is None
+
+
+def test_discord_summary_truncates_at_readable_boundary() -> None:
+    from followthrough.kanban import _discord_summary
+
+    value = "Verified result. " + ("Detailed product information and price. " * 80)
+    summary = _discord_summary(value, limit=180)
+
+    assert summary.endswith("…")
+    assert len(summary) <= 181
+    assert "Detailed product information and price…" in summary

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f4f5ef">
   <title>Followthrough · Ambient operator</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23f4f5ef'/%3E%3Cpath d='M18 23h28M18 34h18' stroke='%234f8f24' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-13">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-15">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -15,9 +15,10 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
       <span><strong>Followthrough</strong><small>Ambient operator</small></span>
     </a>
-    <nav class="view-tabs" aria-label="Dashboard views">
-      <button id="tabOverview" class="view-tab active" type="button" aria-pressed="true">Overview</button>
-      <button id="tabTranscript" class="view-tab" type="button" aria-pressed="false">Transcript</button>
+    <nav class="view-tabs" role="tablist" aria-label="Dashboard views">
+      <button id="tabOverview" class="view-tab active" type="button" role="tab" aria-selected="true" aria-controls="top">Overview</button>
+      <button id="tabTranscript" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="transcriptView">Transcript</button>
+      <button id="tabWorkspace" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="workspaceView">Workspace</button>
     </nav>
     <div class="header-status command-bar">
       <span id="lastSync" class="sync">Connecting…</span>
@@ -25,14 +26,14 @@
     </div>
   </header>
 
-  <main id="top">
+  <main id="top" role="tabpanel" aria-labelledby="tabOverview">
     <section class="hero">
       <div class="hero-copy">
-        <p class="eyebrow"><span></span>Consent-first ambient intelligence</p>
+        <p class="eyebrow"><span></span>Ambient intent → verified computer use</p>
         <h1>Turn conversation<br>into <em>momentum.</em></h1>
-        <p class="lede">Followthrough notices what matters, briefs Hermes, and carries the work forward—while ordinary conversation stays out of memory and actions.</p>
+        <p class="lede">Memo transcribes your day. Say “Memo” for immediate action; useful ambient signals are quietly organized. H Company works the web, Hermes orchestrates, and Followthrough brings the verified result back.</p>
         <div class="trust-row" aria-label="Privacy and infrastructure">
-          <span><i class="check">✓</i>Complete local archive</span><span><i class="check">✓</i>Local on Spark</span><span><i class="check">✓</i>Approval before action</span>
+          <span><i class="check">✓</i>Complete local archive</span><span><i class="check">✓</i>Local on Spark</span><span><i class="check">✓</i>Approval before external writes</span>
         </div>
       </div>
       <div class="ambient-status" aria-label="Listening status">
@@ -48,7 +49,7 @@
       <div class="overview-note"><span class="shield">◇</span><div><strong>Action boundary active</strong><small>Ordinary conversation stays archive-only and never enters operational memory.</small></div></div>
     </section>
 
-    <section class="journey-strip" aria-label="Live ambient journey"><div class="heard"><small>Ambient trigger</small><strong id="journeyHeard">Listening for the demo phrase…</strong><span id="journeyDecision">Mention it, put your phone away, and Followthrough handles it.</span></div><ol id="journeyStages"><li>Heard</li><li>Relevant</li><li>Delegated</li><li>Browsing</li><li>Verified</li><li>Returned to phone</li></ol><div class="journey-proof"><strong id="journeyElapsed">—</strong><small id="journeyPhone">Runs quietly in the background</small></div></section>
+    <section class="journey-strip" aria-label="Live ambient journey"><div class="heard"><small>Ambient trigger</small><strong id="journeyHeard">Listening for the demo phrase…</strong><span id="journeyDecision">Mention it, put your phone away, and Followthrough handles it.</span></div><ol id="journeyStages"><li>Heard</li><li>Relevant</li><li>Delegated</li><li>Browsing</li><li>Verified</li><li>Discord</li><li>Phone</li></ol><div class="journey-proof"><strong id="journeyElapsed">—</strong><small id="journeyPhone">Runs quietly in the background</small></div></section>
 
     <section class="panel agent-panel" aria-labelledby="agentTitle">
       <div class="panel-head">
@@ -59,7 +60,7 @@
         <div class="agent-icon">H</div>
         <div class="agent-copy">
           <strong id="agentTask">No web task yet</strong>
-          <p id="agentAction">Say “check the price of…” or “book…” near the phone and the agent starts here.</p>
+          <p id="agentAction">Say “Memo, check the price of…” near the phone and the agent starts here.</p>
           <div class="agent-meta">
             <span id="agentSteps">0 steps</span>
             <span id="agentAgent">h/web-surfer-flash</span>
@@ -134,7 +135,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   </main>
 
-  <main id="transcriptView" class="transcript-view" hidden>
+  <main id="transcriptView" class="transcript-view" role="tabpanel" aria-labelledby="tabTranscript" hidden>
     <section class="panel transcript-panel">
       <div class="panel-head">
         <div><p class="kicker">Live transcript</p><h2>Everything heard, as it's said</h2></div>
@@ -149,7 +150,20 @@
     </section>
   </main>
 
+  <main id="workspaceView" class="workspace-view" role="tabpanel" aria-labelledby="tabWorkspace" hidden>
+    <section class="workspace-hero">
+      <div><p class="eyebrow"><span></span>Memo intelligence workspace</p><h1>The important things,<br><em>already organized.</em></h1><p>Research, commitments, reminders, and events promoted from the ambient log. Edit the plan without touching the original transcript or execution receipt.</p></div>
+      <aside><strong id="workspaceTotal">0</strong><span>important items</span><small>Live from Hermes</small></aside>
+    </section>
+    <section class="workspace-board" aria-label="Important work grouped by type">
+      <article data-group="research"><header><span class="workspace-icon">⌕</span><div><h2>Research</h2><p>Questions, tools, companies, and verified findings</p></div><b id="countResearch">0</b></header><div id="workspaceResearch" class="workspace-stack"></div></article>
+      <article data-group="backlog"><header><span class="workspace-icon">◇</span><div><h2>Backlog</h2><p>Signals worth keeping, waiting for the right moment</p></div><b id="countBacklog">0</b></header><div id="workspaceBacklog" class="workspace-stack"></div></article>
+      <article data-group="tasks"><header><span class="workspace-icon">✓</span><div><h2>Tasks & reminders</h2><p>Commitments and follow-ups that need closure</p></div><b id="countTasks">0</b></header><div id="workspaceTasks" class="workspace-stack"></div></article>
+      <article data-group="events"><header><span class="workspace-icon">□</span><div><h2>Events & calendar</h2><p>Meetings, dates, and preparation moments</p></div><b id="countEvents">0</b></header><div id="workspaceEvents" class="workspace-stack"></div></article>
+    </section>
+  </main>
+
   <footer><span>Followthrough</span><span>Hermes · NVIDIA Spark · Cloudflare edge</span><span>Built for conversations worth continuing.</span></footer>
-  <script src="/static/app.js?v=20260712-13"></script>
+  <script src="/static/app.js?v=20260712-15"></script>
 </body>
 </html>

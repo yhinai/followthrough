@@ -179,6 +179,43 @@ def test_notification_failures_are_bounded(tmp_path) -> None:
     assert store.kanban_pending_notifications(limit=1) == []
 
 
+def test_web_task_discord_waits_for_authoritative_h_answer(tmp_path) -> None:
+    store = Store(tmp_path / "operations.db")
+    run_id = store.create_run("phone", "web_task", "Followthrough signal", "archive-web")
+    job, _ = store.create_hermes_job(
+        job_id="job-web-notify",
+        run_id=run_id,
+        archive_id="archive-web",
+        event_id="event-web-notify",
+        idempotency_key="followthrough:archive-web:research:v3",
+        capsule_path=str(tmp_path / "web.json"),
+        category="web_task",
+        entity="Check a current price",
+        discord_chat_id="12345",
+    )
+    store.mark_hermes_enqueued(job["id"], "task-web-notify")
+    store.sync_hermes_job(job["id"], "completed", summary="Worker finished first")
+    session = store.create_computer_session(
+        task="Check a current price",
+        agent="h/web-surfer-flash",
+        source_event_id="event-web-notify",
+    )
+    store.update_computer_session(session["id"], state="running", step_count=4)
+
+    assert store.kanban_pending_notifications(limit=1) == []
+
+    store.update_computer_session(
+        session["id"],
+        state="completed",
+        step_count=7,
+        latest_answer="Authoritative H answer",
+        finished_at="2026-07-12T20:00:07+00:00",
+    )
+    pending = store.kanban_pending_notifications(limit=1)
+    assert pending[0]["result_summary"] == "Authoritative H answer"
+    assert pending[0]["computer_steps"] == 7
+
+
 def test_false_positive_can_cancel_only_a_nonrunning_job(tmp_path) -> None:
     store = Store(tmp_path / "operations.db")
     run_id = store.create_run("omi", "todo", "Followthrough signal", "archive-false")

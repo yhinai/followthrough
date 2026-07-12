@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +15,17 @@ from .store import Store
 
 TERMINAL_STATES = {"completed", "failed", "timed_out", "interrupted"}
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+
+def _bounded_agent_task(task: str) -> str:
+    """Keep simple lookup demos decisive without changing the stored request."""
+
+    if re.search(r"(?i)\b(?:price|cost|availability|stock)\b", task):
+        return (
+            f"{task}\n\nStop as soon as one current result and its source are visibly verified. "
+            "Answer immediately; do not exhaustively compare products or scroll beyond the first results page."
+        )
+    return task
 
 
 def _status(value: Any) -> str:
@@ -104,7 +117,7 @@ class HCompanyExecutor:
             ) as client:
                 body: dict[str, Any] = {
                     "agent": self.settings.h_agent,
-                    "messages": [{"type": "user_message", "message": task}],
+                    "messages": [{"type": "user_message", "message": _bounded_agent_task(task)}],
                     "max_steps": self.settings.h_max_steps,
                     "max_time_s": self.settings.h_max_time_seconds,
                 }
@@ -146,14 +159,30 @@ class HCompanyExecutor:
                 timeout=httpx.Timeout(30.0, read=40.0),
                 transport=self.transport,
             ) as client:
+                transient_failures = 0
                 while True:
-                    changes = await client.get(
-                        f"/sessions/{session_id}/changes",
-                        params={"from_index": cursor, "wait_for_seconds": 15},
-                    )
+                    try:
+                        changes = await client.get(
+                            f"/sessions/{session_id}/changes",
+                            params={"from_index": cursor, "wait_for_seconds": 15},
+                        )
+                        changes.raise_for_status()
+                    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else 0
+                        if transient_failures >= 2 or (status and status < 500 and status != 429):
+                            raise
+                        transient_failures += 1
+                        row = self.store.update_computer_session(
+                            identifier,
+                            state="running",
+                            current_action=f"H session reconnect {transient_failures}/2",
+                        )
+                        await self.publish("computer_use_progress", row)
+                        await asyncio.sleep(0.5 * transient_failures)
+                        continue
+                    transient_failures = 0
                     if changes.status_code == 204:
                         continue
-                    changes.raise_for_status()
                     payload = changes.json()
                     events = payload.get("new_events") or []
                     cursor += len(events)

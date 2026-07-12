@@ -122,6 +122,9 @@ class Store:
         self._ensure_column("hermes_jobs", "diagnostics_json", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column("hermes_jobs", "notification_attempts", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("hermes_jobs", "last_polled_at", "TEXT")
+        self._ensure_column("hermes_jobs", "workspace_title", "TEXT")
+        self._ensure_column("hermes_jobs", "workspace_group", "TEXT")
+        self._ensure_column("hermes_jobs", "workspace_deleted", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("computer_use_sessions", "latest_frame_url", "TEXT")
         self.db.commit()
 
@@ -324,6 +327,7 @@ class Store:
         acceptance: list[str] | tuple[str, ...] = ("Use primary sources", "Verify claims", "Record blocked effects"),
         discord_chat_id: str | None = None,
         discord_user_id: str | None = None,
+        initial_state: str = "pending",
     ) -> tuple[dict[str, Any], bool]:
         timestamp = now()
         with self.lock:
@@ -331,8 +335,8 @@ class Store:
             if existing:
                 return dict(existing), False
             self.db.execute(
-                "INSERT INTO hermes_jobs(id,run_id,archive_id,event_id,idempotency_key,state,capsule_path,category,entity,intent,acceptance_json,discord_chat_id,discord_user_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?)",
-                (job_id, run_id, archive_id, event_id, idempotency_key, capsule_path, category, entity, intent[:500], json.dumps(list(acceptance)[:20]), discord_chat_id, discord_user_id, timestamp, timestamp),
+                "INSERT INTO hermes_jobs(id,run_id,archive_id,event_id,idempotency_key,state,capsule_path,category,entity,intent,acceptance_json,discord_chat_id,discord_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (job_id, run_id, archive_id, event_id, idempotency_key, initial_state, capsule_path, category, entity, intent[:500], json.dumps(list(acceptance)[:20]), discord_chat_id, discord_user_id, timestamp, timestamp),
             )
             self.db.commit()
         return self.hermes_job(job_id) or {}, True
@@ -348,6 +352,13 @@ class Store:
 
     def hermes_job_for_run(self, run_id: str) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
+        return dict(row) if row else None
+
+    def hermes_job_for_event(self, event_id: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT * FROM hermes_jobs WHERE event_id=? ORDER BY created_at DESC LIMIT 1",
+            (event_id,),
+        ).fetchone()
         return dict(row) if row else None
 
     def pending_hermes_jobs(self, limit: int = 10) -> list[dict[str, Any]]:
@@ -413,6 +424,50 @@ class Store:
     def list_hermes_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
         return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()]
 
+    def list_workspace_items(self, limit: int = 200) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            "SELECT id,event_id,category,entity,workspace_title,workspace_group,state,task_id,created_at,updated_at "
+            "FROM hermes_jobs WHERE workspace_deleted=0 ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        category_groups = {
+            "repository": "research", "web_task": "research", "tool": "research",
+            "startup": "research", "performance": "research", "todo": "tasks",
+            "contact": "tasks", "goal": "tasks", "event": "events",
+        }
+        return [
+            {
+                **dict(row),
+                "title": row["workspace_title"] or row["entity"],
+                "group": row["workspace_group"] or (
+                    "backlog" if row["state"] == "backlog" else category_groups.get(row["category"], "backlog")
+                ),
+            }
+            for row in rows
+        ]
+
+    def update_workspace_item(
+        self, identifier: str, *, title: str, group: str
+    ) -> dict[str, Any] | None:
+        with self.lock:
+            self.db.execute(
+                "UPDATE hermes_jobs SET workspace_title=?,workspace_group=?,updated_at=? "
+                "WHERE id=? AND workspace_deleted=0",
+                (title[:300], group, now(), identifier),
+            )
+            self.db.commit()
+        return next((row for row in self.list_workspace_items() if row["id"] == identifier), None)
+
+    def delete_workspace_item(self, identifier: str) -> bool:
+        with self.lock:
+            cursor = self.db.execute(
+                "UPDATE hermes_jobs SET workspace_deleted=1,updated_at=? "
+                "WHERE id=? AND workspace_deleted=0",
+                (now(), identifier),
+            )
+            self.db.commit()
+        return cursor.rowcount == 1
+
     def kanban_pending_create(self, *, limit: int) -> list[dict[str, Any]]:
         with self.lock:
             rows = self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NULL AND state IN ('pending','retry','dispatching') AND attempts<5 ORDER BY created_at LIMIT ?", (limit,)).fetchall()
@@ -469,12 +524,16 @@ class Store:
     def kanban_pending_notifications(self, *, limit: int) -> list[dict[str, Any]]:
         with self.lock:
             rows = self.db.execute(
-                "SELECT h.*,COALESCE(NULLIF(c.latest_answer,''),NULLIF(r.summary,''),h.latest_outcome,'Completed') AS result_summary "
+                "SELECT h.*,COALESCE(NULLIF(c.latest_answer,''),NULLIF(r.summary,''),h.latest_outcome,'Completed') AS result_summary,"
+                "c.step_count AS computer_steps,c.created_at AS computer_started_at,"
+                "c.finished_at AS computer_finished_at,c.agent_view_url AS computer_replay_url "
                 "FROM hermes_jobs h LEFT JOIN runs r ON r.id=h.run_id "
                 "LEFT JOIN computer_use_sessions c ON c.source_event_id=h.event_id "
                 "WHERE h.task_id IS NOT NULL AND h.discord_chat_id IS NOT NULL "
                 "AND h.notification_state NOT IN ('delivered','failed') AND h.notification_attempts<5 "
-                "AND h.state='completed' ORDER BY h.updated_at LIMIT ?",
+                "AND h.state='completed' "
+                "AND (h.category!='web_task' OR (c.state='completed' AND NULLIF(c.latest_answer,'') IS NOT NULL)) "
+                "ORDER BY h.updated_at LIMIT ?",
                 (limit,),
             ).fetchall()
             if rows:
@@ -492,6 +551,10 @@ class Store:
                 "event_id": row["event_id"],
                 "entity": row["entity"],
                 "result_summary": row["result_summary"],
+                "computer_steps": row["computer_steps"],
+                "computer_started_at": row["computer_started_at"],
+                "computer_finished_at": row["computer_finished_at"],
+                "computer_replay_url": row["computer_replay_url"],
             }
             for row in rows
         ]
@@ -514,8 +577,9 @@ class Store:
                 "run_id": row["run_id"],
                 "task_id": row["task_id"],
                 "event_id": row["event_id"],
+                "category": row["category"],
             }
-            for row in self.db.execute("SELECT run_id,task_id,event_id FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()
+            for row in self.db.execute("SELECT run_id,task_id,event_id,category FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()
         ]
 
     def kanban_record_reconciled(self, run_id: str, *, task_id: str, state: str, hermes_status: str, latest_outcome: str, diagnostics: list[str] | tuple[str, ...], summary: str | None = None) -> bool:

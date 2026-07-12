@@ -43,5 +43,7 @@ The endpoint defaults to `https://followthrough.alhinai.dev`. The discreet Setti
 - Audio continued after the app left the foreground.
 - A real spoken gold-price request created an H Company session, completed a Hermes job, returned through restart-safe phone polling, and produced a verified Discord DM.
 - `Discord only` completed without phone playback; `Discord + voice` produced built-in-speaker playback.
+- Overlapping Gemini transcript windows are merged case-insensitively with whitespace normalization, so the live word stream updates in place instead of repeating prior phrases.
+- The 2026-07-12 device replay used the same completed Best Buy job for both response modes, then restored Memo to intentional `Muted` state with no injected test result left queued.
 
 Omi may remain installed as an inactive rollback option, but Memo is the only active capture path.

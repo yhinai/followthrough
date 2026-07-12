@@ -125,6 +125,11 @@ class InterestWeightIn(BaseModel):
     source: str = Field(default="explicit", min_length=2, max_length=50)
 
 
+class WorkspaceItemIn(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    group: Literal["research", "backlog", "tasks", "events"]
+
+
 class RoleIn(BaseModel):
     name: str = Field(min_length=2, max_length=50)
     job: str = Field(min_length=8, max_length=500)

@@ -24,9 +24,10 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 
 - Public health endpoint, Followthrough, orchestrator, and Cloudflare tunnel are active.
 - Public health reports `auth_required: false`; there are no Followthrough token files, token middleware, or dashboard token prompts.
-- Followthrough Python suite: 194 passed after transcript streaming, Discord delivery, and H-session fixes.
+- Followthrough Python suite: 255 passed after the unified journey, Memo activation, passive-signal backlog, single-owner H routing, Workspace CRUD, Discord receipt, and optional LiveKit adapter tests.
 - Memo Android build: successful on OpenJDK 17.
 - Samsung `SM-F776U1`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified.
+- Ambient relevance eval: 40/40 realistic cases, with all 20 actionable signals promoted and all 20 ordinary-conversation cases excluded from actions.
 
 ## Two-way contract
 
@@ -36,6 +37,9 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 - Memo persists pending IDs in Android preferences and resumes polling after restart.
 - Terminal states are `completed`, `dead_letter`, `needs_attention`, and `cancelled`.
 - Hermes/H results are persisted, delivered idempotently to Discord, and returned to Memo. Memo speaks them only in `Discord + voice` mode.
+- `/api/journey` links one source event to its decision, Hermes job, H Company session, Discord receipt, and phone return state. The dashboard does not infer these relationships by timestamp.
+- Saying `Memo, ...` is an explicit owner override and always creates work, even when that category was muted or the same content was previously corrected to ignore. Passive tool, startup, and goal mentions are preserved in Workspace Backlog without automatically starting a worker.
+- Web tasks have one browser owner: the typed H Company runner. Hermes holds the durable card and delivery receipt, then the orchestrator closes it from the authoritative H result; Hermes does not launch a duplicate browser-research pass.
 
 ## Tools and services
 
@@ -51,6 +55,7 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 | Agent runtime | Hermes Kanban board and least-authority `followthrough` worker profile |
 | Repository evaluation | Pinned provenance, policy scan, systemd+bubblewrap sandbox runner, deterministic receipts |
 | Owner surfaces | Durable Hermes Discord DM, optional Memo spoken result, live dashboard and `#transcript` word stream |
+| Daily organization | Responsive `#workspace` view with Research, Backlog, Tasks & reminders, and Events & calendar; title/group edits and non-destructive removal |
 | Verification | Pytest/Ruff, Android Gradle build, public health checks, and optional bounded monitoring |
 
 ## Typed workflow verification
@@ -63,6 +68,10 @@ Verified live on 2026-07-12 PDT:
   primary-calendar event with attendee notifications disabled and then deleted it.
 - The current typed Discord result path delivered messages `86857` and `86858`
   to the configured owner DM, with H answers and Hermes receipts.
+- Completed Best Buy run `9323f56f-8507-47b1-aabc-4a581843f321` linked the
+  ambient event, Hermes receipt `t_401dfc5f`, and H Company session in one
+  public seven-stage journey. Its receipt includes H steps, elapsed time, and
+  the session replay URL.
 - Sandbox purchase effect `3285dd4f-969c-453d-9eae-fdf96f3e4c31`
   authorized one cent in test mode and was then voided. No real payment moved.
 - Deployment effect `fdb8b9de-16f6-400d-b7a7-2f5dd967dad4` reached the
@@ -86,6 +95,11 @@ The product is operational. The physical Samsung has verified continuous audio,
 live word streaming, finalized transcript ingestion, H Company browsing,
 completed Hermes work, typed Discord delivery, restart-safe result recovery,
 built-in-speaker routing, and automatic listening restoration after reboot.
+
+Both phone delivery policies were replayed against the same completed real job:
+`Discord only` consumed the result with no speaker playback, while `Discord +
+voice` produced the `Verified result audio playing through the built-in speaker`
+device receipt. The phone was returned to its intentional muted state afterward.
 
 The free Spark desktop plane is active and restart-enabled. Public doctor and
 screenshot checks pass, the noVNC WebSocket negotiates RFB 3.8 through

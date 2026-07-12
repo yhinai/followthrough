@@ -98,3 +98,11 @@ def test_start_url_query_excludes_the_wake_word_and_assistant_tail() -> None:
     # Searching Best Buy for "followthrough ... tell me when you're done" sent
     # the agent wandering for 46 steps.
     assert start_url(command) == "https://www.bestbuy.com/site/searchpage.jsp?st=rtx+5080"
+
+
+def test_general_price_question_starts_on_search_results() -> None:
+    from followthrough.integrations import start_url
+
+    assert start_url("What's the cost of gold today") == (
+        "https://www.bing.com/search?q=gold+today"
+    )

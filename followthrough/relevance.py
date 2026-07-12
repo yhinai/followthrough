@@ -334,8 +334,9 @@ _RULES: tuple[_Rule, ...] = (
         _rx(
             r"\b(?:book|reserve|order|purchase|add\s+to\s+cart|"
             r"buy\s+(?:me\s+)?(?:a|an|the|some)\b|"
-            r"check\b.{0,48}\b(?:price|cost)|(?:price|cost)\s+(?:of|for|watch|check)|"
+            r"check\b.{0,48}\b(?:price|cost|availability|stock)|(?:price|cost)\s+(?:of|for|watch|check)|"
             r"(?:what(?:'s| is)|how\s+much\s+is)\b.{0,48}\b(?:price|cost)|"
+            r"how\s+much\s+is\s+(?:gold|silver|bitcoin|ethereum)\b|"
             r"fill\s+(?:out|in)|sign\s+(?:me\s+)?up\s+for|apply\s+(?:to|for)|"
             r"find\s+(?:me\s+)?(?:a|an|the|the\s+cheapest|cheap)\b|"
             r"search\s+(?:the\s+web|online)\s+for)\b"
@@ -388,7 +389,7 @@ _RULES: tuple[_Rule, ...] = (
         Category.TODO,
         _rx(
             r"\b(?:i|we)\s+(?:need|have|must)\s+to\s+"
-            r"(?:finish|build|research|check|send|deploy|update|fix|write|buy|book)\b"
+            r"(?:finish|build|research|check|send|deploy|update|fix|write|buy|book|prepare)\b"
         ),
         0.91,
         "Recognized a concrete work commitment",
@@ -403,7 +404,7 @@ _RULES: tuple[_Rule, ...] = (
     _Rule(
         "event.calendar",
         Category.EVENT,
-        _rx(r"\b(?:add\s+to\s+(?:my\s+)?calendar|schedule\s+(?:a|the)?\s*meeting|register\s+for)\b"),
+        _rx(r"\b(?:add(?:\s+.{1,60})?\s+to\s+(?:my\s+)?calendar|schedule\s+(?:a|the)?\s*meeting|register\s+for)\b"),
         0.94,
         "Recognized calendar or registration intent",
     ),
@@ -423,7 +424,7 @@ _RULES: tuple[_Rule, ...] = (
     _Rule(
         "goal.explicit",
         Category.GOAL,
-        _rx(r"\b(?:my|our)\s+(?:goal|objective|target|milestone)\b"),
+        _rx(r"\b(?:(?:my|our)\s+(?:goal|objective|target|milestone)|the\s+goal\s+is)\b"),
         0.9,
         "Recognized an explicit goal",
     ),
@@ -554,6 +555,7 @@ def evaluate_relevance(
     speaker = speaker or SpeakerContext.unknown()
     interests = interests or InterestModel()
     clean = " ".join(text.split())
+    memo_activated = bool(re.search(r"\b(?:hey\s+)?memo\s*[,;:\-]?\s+", clean, re.IGNORECASE))
     fingerprint = content_fingerprint(clean)
     owner_status, owner_confidence, owner_evidence = _speaker_assessment(speaker)
     ambient_authorized = (
@@ -570,9 +572,20 @@ def evaluate_relevance(
             ),
         )
     categories, evidence = _category_evidence(clean)
+    if memo_activated:
+        if not categories:
+            categories = (Category.WEB_TASK,)
+        evidence += (
+            Evidence(
+                "activation.memo_explicit",
+                categories[0],
+                0.995,
+                "The owner explicitly addressed Memo",
+            ),
+        )
 
     correction = interests.correction_for(fingerprint)
-    if correction is not None:
+    if correction is not None and not memo_activated:
         corrected_categories = _ordered_categories(correction.categories or categories)
         correction_evidence = Evidence(
             "correction.applied",
@@ -672,7 +685,7 @@ def evaluate_relevance(
 
     primary = categories[0]
     interest_weight = interests.weight_for(primary)
-    if interest_weight <= -0.75:
+    if interest_weight <= -0.75 and not memo_activated:
         muted = Evidence(
             "interest.category_muted",
             primary,
@@ -702,7 +715,13 @@ def evaluate_relevance(
         categories,
         primary,
         round(confidence, 3),
-        "owner_relevant_signal" if owner_status == OwnerStatus.OWNER else "ambient_relevant_signal",
+        (
+            "owner_explicit_memo_command"
+            if memo_activated
+            else "owner_relevant_signal"
+            if owner_status == OwnerStatus.OWNER
+            else "ambient_relevant_signal"
+        ),
         speaker_evidence + evidence,
         ambient_authorized=ambient_authorized,
     )

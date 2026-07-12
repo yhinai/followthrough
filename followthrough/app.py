@@ -44,6 +44,7 @@ from .models import (
     TaskControlIn,
     TranscriptEventIn,
     TranscriptPartialIn,
+    WorkspaceItemIn,
 )
 from .relevance import (
     Category,
@@ -329,7 +330,13 @@ def create_app(config: Settings = settings) -> FastAPI:
             raise HTTPException(status_code=503, detail=decision.reason_code)
 
     async def enqueue_durable_job(
-        run_id: str, archive_id: str, event_id: str, category: str, named_entity: str
+        run_id: str,
+        archive_id: str,
+        event_id: str,
+        category: str,
+        named_entity: str,
+        *,
+        deferred: bool = False,
     ) -> dict[str, object]:
         job_id = str(uuid.uuid4())
         capsule_name = hashlib.sha256(run_id.encode()).hexdigest()[:24] + ".json"
@@ -341,7 +348,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             "performance": "Research and test the named optimization using reproducible measurements without changing production defaults.",
             "event": "Research the named event, extract verified logistics and useful preparation actions.",
             "todo": "Turn the captured commitment into a concrete private task with a verifiable completion condition.",
-            "web_task": "Run the named task on the live web with the H Company computer-use agent (hai-agents platform MCP: run_agent, then wait_for_session). Return a short spoken-style summary of the outcome plus the session receipt.",
+            "web_task": "Track the separately started H Company computer-use session. The typed H runner owns browsing; Hermes owns the durable task, receipt, and delivery lifecycle.",
         }.get(
             category,
             "Research and evaluate the named item, then return cited findings and a safe next action.",
@@ -368,7 +375,18 @@ def create_app(config: Settings = settings) -> FastAPI:
             acceptance=acceptance,
             discord_chat_id=discord_id,
             discord_user_id=discord_id,
+            initial_state="backlog" if deferred else "pending",
         )
+        if deferred:
+            await bus.publish(
+                "job_backlogged", {"event_id": event_id, "run_id": run_id, "job_id": job["id"]}
+            )
+            return {
+                "status": "backlog",
+                "run_id": run_id,
+                "job_id": job["id"],
+                "orchestrator": "hermes-kanban",
+            }
         if not controls.operation_allowed(Capability.ACTIONS) or not controls.operation_allowed(
             Capability.SESSIONS
         ):
@@ -540,7 +558,16 @@ def create_app(config: Settings = settings) -> FastAPI:
             archived["id"], run_id, relevance.content_fingerprint, category, subject
         )
         queued = await enqueue_durable_job(
-            run_id, archived["id"], payload.event_id, category, subject
+            run_id,
+            archived["id"],
+            payload.event_id,
+            category,
+            subject,
+            deferred=(
+                relevance.reason_code != "owner_explicit_memo_command"
+                and category in {"tool", "startup", "goal"}
+                and relevance.confidence < 0.93
+            ),
         )
         computer_use = None
         if category == "web_task":
@@ -1075,6 +1102,27 @@ def create_app(config: Settings = settings) -> FastAPI:
     async def jobs() -> list[dict[str, object]]:
         return store.list_hermes_jobs()
 
+    @application.get("/api/workspace")
+    async def workspace_items() -> list[dict[str, object]]:
+        return store.list_workspace_items()
+
+    @application.patch("/api/workspace/{item_id}")
+    async def update_workspace_item(
+        item_id: str, payload: WorkspaceItemIn
+    ) -> dict[str, object]:
+        item = store.update_workspace_item(item_id, title=payload.title.strip(), group=payload.group)
+        if not item:
+            raise HTTPException(status_code=404, detail="workspace item not found")
+        await bus.publish("workspace_updated", {"item_id": item_id})
+        return item
+
+    @application.delete("/api/workspace/{item_id}", status_code=204)
+    async def delete_workspace_item(item_id: str) -> Response:
+        if not store.delete_workspace_item(item_id):
+            raise HTTPException(status_code=404, detail="workspace item not found")
+        await bus.publish("workspace_updated", {"item_id": item_id, "deleted": True})
+        return Response(status_code=204)
+
     @application.get("/api/v1/jobs/{job_id}")
     async def device_job(job_id: str) -> dict[str, object]:
         job = store.hermes_job(job_id)
@@ -1217,6 +1265,179 @@ def create_app(config: Settings = settings) -> FastAPI:
                 ),
                 "spark_local": bool(desktop.local_token),
             },
+        }
+
+    @application.get("/api/journey")
+    async def journey() -> dict[str, object]:
+        """Return one event-linked story for the judge-facing live timeline.
+
+        The dashboard previously guessed relationships by independently sorting
+        activity, jobs, and H sessions. This contract follows one event ID all
+        the way through relevance, execution, Discord, and phone polling so a
+        busy system cannot splice together unrelated runs.
+        """
+
+        sessions = store.list_computer_sessions(limit=1)
+        session = sessions[0] if sessions else None
+        job = (
+            store.hermes_job_for_event(str(session["source_event_id"]))
+            if session and session.get("source_event_id")
+            else None
+        )
+        if not job:
+            jobs = store.list_hermes_jobs(limit=1)
+            job = jobs[0] if jobs else None
+        event_id = str(
+            (session or {}).get("source_event_id") or (job or {}).get("event_id") or ""
+        )
+        if not event_id:
+            return {"event_id": None, "stages": [], "state": "idle"}
+        if not session or session.get("source_event_id") != event_id:
+            session = store.computer_session_for_event(event_id)
+        archived = archive_store.by_event(event_id)
+        decision = store.relevance_for_event(event_id)
+        transcript = ""
+        if archived:
+            transcript = archived["transcript_bytes"].decode("utf-8", errors="replace")[:320]
+
+        h_state = str((session or {}).get("state") or "pending")
+        h_terminal = h_state in H_TERMINAL_STATES
+        verified = bool(
+            session
+            and h_state == "completed"
+            and str(session.get("latest_answer") or "").strip()
+        )
+        discord_delivered = bool(job and job.get("notification_state") == "delivered")
+        returned_at = (job or {}).get("last_polled_at")
+        returned = bool(returned_at)
+        failed = h_terminal and not verified
+
+        def stage(
+            key: str,
+            label: str,
+            state: str,
+            at: object = None,
+            detail: str = "",
+        ) -> dict[str, object]:
+            return {"key": key, "label": label, "state": state, "at": at, "detail": detail}
+
+        explanation = ""
+        if decision:
+            evidence = decision.get("evidence") or []
+            explanation = next(
+                (
+                    str(item.get("explanation"))
+                    for item in reversed(evidence)
+                    if isinstance(item, dict) and item.get("explanation")
+                ),
+                str(decision.get("reason_code") or ""),
+            )
+        stages = [
+            stage(
+                "heard",
+                "Heard",
+                "done" if archived else "pending",
+                (archived or {}).get("received_at"),
+                f"{(archived or {}).get('source', 'phone')} transcript finalized",
+            ),
+            stage(
+                "relevant",
+                "Relevant",
+                "done" if decision and decision.get("disposition") == "action" else "failed",
+                (decision or {}).get("created_at"),
+                explanation,
+            ),
+            stage(
+                "delegated",
+                "Delegated",
+                "done" if job else "pending",
+                (job or {}).get("created_at"),
+                f"Hermes {(job or {}).get('task_id') or 'receipt pending'}",
+            ),
+            stage(
+                "browsing",
+                "Browsing",
+                "failed" if failed else "done" if verified else "active" if session else "pending",
+                (session or {}).get("created_at"),
+                f"{(session or {}).get('step_count', 0)} H Company steps",
+            ),
+            stage(
+                "verified",
+                "Verified",
+                "failed" if failed else "done" if verified else "pending",
+                (session or {}).get("finished_at"),
+                "H answer received" if verified else str((session or {}).get("error") or ""),
+            ),
+            stage(
+                "discord",
+                "Discord",
+                "done" if discord_delivered else "active" if verified else "pending",
+                (job or {}).get("updated_at") if discord_delivered else None,
+                "Owner DM delivered" if discord_delivered else "Awaiting typed delivery",
+            ),
+            stage(
+                "phone",
+                "Phone",
+                "done" if returned else "active" if verified else "pending",
+                returned_at,
+                "Result collected by Memo" if returned else "Awaiting Memo poll",
+            ),
+        ]
+        started_at = (archived or {}).get("received_at") or (session or {}).get("created_at")
+        ended_at = returned_at or (session or {}).get("finished_at") or (session or {}).get("updated_at")
+        elapsed = None
+        if started_at and ended_at:
+            elapsed = max(
+                0,
+                round(
+                    (
+                        datetime.fromisoformat(str(ended_at))
+                        - datetime.fromisoformat(str(started_at))
+                    ).total_seconds()
+                ),
+            )
+        execution_seconds = None
+        if (session or {}).get("created_at") and (session or {}).get("finished_at"):
+            execution_seconds = max(
+                0,
+                round(
+                    (
+                        datetime.fromisoformat(str(session["finished_at"]))
+                        - datetime.fromisoformat(str(session["created_at"]))
+                    ).total_seconds()
+                ),
+            )
+        return {
+            "event_id": event_id,
+            "state": "failed" if failed else "completed" if returned and discord_delivered else "running",
+            "transcript": transcript,
+            "source": (archived or {}).get("source"),
+            "decision": (
+                {
+                    "category": ((decision or {}).get("categories") or [None])[0],
+                    "confidence": (decision or {}).get("confidence"),
+                    "reason_code": (decision or {}).get("reason_code"),
+                    "explanation": explanation,
+                }
+                if decision
+                else None
+            ),
+            "job": (
+                {
+                    "id": job["id"],
+                    "state": job["state"],
+                    "task_id": job.get("task_id"),
+                    "entity": job.get("entity"),
+                }
+                if job
+                else None
+            ),
+            "computer_use": session,
+            "discord_delivered": discord_delivered,
+            "phone_returned": returned,
+            "elapsed_seconds": elapsed,
+            "execution_seconds": execution_seconds,
+            "stages": stages,
         }
 
     @application.get("/api/activity")

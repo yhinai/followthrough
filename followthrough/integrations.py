@@ -144,6 +144,14 @@ def start_url(text: str) -> str | None:
         if not query:
             return template.split("?")[0]
         return template.format(q=quote_plus(query))
+    # Informational price/availability questions do not need to spend the first
+    # agent steps finding and operating a search box. Start on the results page;
+    # transactional commands remain un-routed so the agent can choose safely.
+    if re.search(r"(?i)\b(?:price|cost|availability|stock|how\s+much)\b", text):
+        query = _STOPWORDS.sub(" ", text.lower())
+        query = " ".join(query.split())
+        if query:
+            return f"https://www.bing.com/search?q={quote_plus(query)}"
     return None
 
 

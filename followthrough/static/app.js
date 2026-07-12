@@ -36,6 +36,10 @@ async function api(path, options = {}) {
 }
 
 async function jsonApi(path, options = {}) { return (await api(path, options)).json(); }
+async function safeJson(path, fallback) {
+  try { return await jsonApi(path); }
+  catch (error) { console.warn(`Panel unavailable: ${path}`, error); return fallback; }
+}
 const timeAgo = (value) => {
   const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
   if (seconds < 5) return "now";
@@ -228,17 +232,83 @@ async function loadTranscript(reset = false) {
 
 function setView(view) {
   const transcript = view === "transcript";
+  const workspace = view === "workspace";
   document.body.dataset.view = view;
-  $("#top").hidden = transcript;
+  $("#top").hidden = transcript || workspace;
   $("#transcriptView").hidden = !transcript;
-  $("#tabOverview").classList.toggle("active", !transcript);
-  $("#tabOverview").setAttribute("aria-pressed", String(!transcript));
+  $("#workspaceView").hidden = !workspace;
+  $("#tabOverview").classList.toggle("active", !transcript && !workspace);
+  $("#tabOverview").setAttribute("aria-selected", String(!transcript && !workspace));
   $("#tabTranscript").classList.toggle("active", transcript);
-  $("#tabTranscript").setAttribute("aria-pressed", String(transcript));
+  $("#tabTranscript").setAttribute("aria-selected", String(transcript));
+  $("#tabWorkspace").classList.toggle("active", workspace);
+  $("#tabWorkspace").setAttribute("aria-selected", String(workspace));
   if (transcript) transcriptLoaded ? refreshTranscriptHead() : loadTranscript(true);
-  const hash = transcript ? "#transcript" : "";
+  const hash = transcript ? "#transcript" : workspace ? "#workspace" : "";
   if (location.hash !== hash) history.replaceState(null, "", hash || location.pathname + location.search);
 }
+
+const workspaceTargets = {
+  research: ["#workspaceResearch", "#countResearch"],
+  backlog: ["#workspaceBacklog", "#countBacklog"],
+  tasks: ["#workspaceTasks", "#countTasks"],
+  events: ["#workspaceEvents", "#countEvents"],
+};
+
+function workspaceCard(item) {
+  const title = escapeHtml(item.title || item.entity || "Untitled item");
+  const group = escapeHtml(item.group || "backlog");
+  return `<div class="workspace-card" data-id="${escapeHtml(item.id)}" data-group="${group}"><div class="workspace-card-top"><span class="workspace-kind">${escapeHtml(label(item.category))}</span><span class="workspace-state ${escapeHtml(item.state)}"><i></i>${escapeHtml(label(item.state))}</span></div><strong>${title}</strong><div class="workspace-card-meta"><span>${item.task_id ? `Receipt ${escapeHtml(item.task_id)}` : "Receipt pending"}</span>${timeEl(item.updated_at)}</div><div class="workspace-actions"><button type="button" data-action="edit">Edit</button><button type="button" data-action="delete">Delete</button></div></div>`;
+}
+
+function renderWorkspace(items) {
+  $("#workspaceTotal").textContent = items.length;
+  for (const [group, [target, count]] of Object.entries(workspaceTargets)) {
+    const grouped = items.filter((item) => item.group === group);
+    $(count).textContent = grouped.length;
+    setHTML(target, grouped.length ? grouped.map(workspaceCard).join("") : `<div class="workspace-empty">Nothing here yet.<br><span>Memo will promote it when it matters.</span></div>`);
+  }
+}
+
+async function editWorkspaceCard(card) {
+  const id = card.dataset.id;
+  const current = card.querySelector("strong").textContent;
+  const group = card.dataset.group;
+  card.classList.add("editing");
+  card.innerHTML = `<label>Title<input maxlength="300" value="${escapeHtml(current)}"></label><label>Move to<select><option value="research">Research</option><option value="backlog">Backlog</option><option value="tasks">Tasks & reminders</option><option value="events">Events & calendar</option></select></label><div class="workspace-actions"><button type="button" data-action="save">Save</button><button type="button" data-action="cancel">Cancel</button></div>`;
+  card.querySelector("select").value = group;
+  card.querySelector("input").focus();
+}
+
+$("#workspaceView").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+  const card = event.target.closest(".workspace-card");
+  if (!button || !card) return;
+  const action = button.dataset.action;
+  button.disabled = true;
+  try {
+    if (action === "edit") return editWorkspaceCard(card);
+    if (action === "cancel") { htmlCache.clear(); return load(); }
+    if (action === "delete") {
+      if (!window.confirm("Remove this item from your workspace? Its source transcript and execution receipt stay intact.")) return;
+      await api(`/api/workspace/${encodeURIComponent(card.dataset.id)}`, {method:"DELETE"});
+      showToast("Removed from workspace.", "success");
+      return load();
+    }
+    if (action === "save") {
+      const title = card.querySelector("input").value.trim();
+      const group = card.querySelector("select").value;
+      if (!title) return showToast("Give the item a title.", "error");
+      await jsonApi(`/api/workspace/${encodeURIComponent(card.dataset.id)}`, {method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({title, group})});
+      showToast("Workspace updated.", "success");
+      return load();
+    }
+  } catch (error) {
+    showToast(`Workspace update failed: ${error.message}`, "error");
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
+});
 
 function jobRow(job) {
   const state = escapeHtml(job.state || "queued");
@@ -506,27 +576,44 @@ function renderAgent(sessions) {
     </li>`).join(""));
 }
 
-function renderJourney(activity, sessions, jobs) {
-  const session = sessions[0];
-  const signal = session ? activity.find((item) => item.event_id === session.source_event_id) : activity.find((item) => item.relevant);
-  const job = session ? jobs.find((item) => item.event_id === session.source_event_id) : null;
-  const browsing = session && AGENT_LIVE.has(session.state);
-  const verified = session?.state === "completed" && Boolean(session.latest_answer);
-  const returned = verified && job?.last_polled_at && new Date(job.last_polled_at) >= new Date(session.finished_at || session.updated_at);
-  [Boolean(signal), Boolean(signal?.relevant), Boolean(session), Boolean(browsing || verified), Boolean(verified), Boolean(returned)].forEach((done, index) => document.querySelectorAll("#journeyStages li")[index]?.classList.toggle("done", done));
-  $("#journeyHeard").textContent = signal ? `Heard: “${String(signal.text).slice(0, 88)}”` : "Listening for the demo phrase…";
-  $("#journeyDecision").textContent = signal?.relevant ? "Relevant signal detected · Web task created" : "Mention it, put your phone away, and Followthrough handles it.";
-  if (session?.created_at) { const end = session.finished_at || session.updated_at; const seconds = Math.max(0, Math.round((new Date(end) - new Date(session.created_at)) / 1000)); $("#journeyElapsed").textContent = verified ? `Completed in ${seconds}s` : `Working for ${seconds}s`; }
-  $("#journeyPhone").textContent = returned ? "Returned to Samsung Flip · playback ready" : verified ? "Result ready · awaiting phone poll" : "Runs quietly in the background";
+function renderJourney(journey) {
+  const nodes = [...document.querySelectorAll("#journeyStages li")];
+  nodes.forEach((node, index) => {
+    const stage = journey?.stages?.[index];
+    node.className = stage?.state || "pending";
+    node.title = stage?.detail || "";
+  });
+  if (!journey?.event_id) {
+    $("#journeyHeard").textContent = "Listening for the demo phrase…";
+    $("#journeyDecision").textContent = "Mention it, put your phone away, and Followthrough handles it.";
+    $("#journeyElapsed").textContent = "—";
+    $("#journeyPhone").textContent = "Runs quietly in the background";
+    return;
+  }
+  const decision = journey.decision;
+  $("#journeyHeard").textContent = `Heard: “${String(journey.transcript || "").slice(0, 88)}”`;
+  $("#journeyDecision").textContent = decision
+    ? `${label(decision.category || decision.reason_code)} · ${Math.round(Number(decision.confidence || 0) * 100)}% · ${decision.explanation}`
+    : "Evaluating relevance…";
+  const visibleSeconds = journey.execution_seconds ?? journey.elapsed_seconds;
+  $("#journeyElapsed").textContent = visibleSeconds == null
+    ? "Working…"
+    : `${journey.state === "completed" ? "Completed" : "Elapsed"} in ${visibleSeconds}s`;
+  $("#journeyPhone").textContent = journey.phone_returned
+    ? "Discord delivered · collected by Samsung Flip"
+    : journey.discord_delivered
+      ? "Discord delivered · awaiting phone poll"
+      : "Runs quietly in the background";
 }
 
 async function load() {
   try {
-    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions] = await Promise.all([
-      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions"), jsonApi("/api/computer-use")
+    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions, journey, workspaceItems] = await Promise.all([
+      safeJson("/api/metrics", {}), safeJson("/api/jobs", []), safeJson("/api/controls", {global:{mode:"unknown"}}), safeJson("/api/memory/operational", []), safeJson("/api/activity", []), safeJson("/api/desktop/doctor", {ready:false}), safeJson("/api/desktop/actions", []), safeJson("/api/computer-use", []), safeJson("/api/journey", {state:"idle",stages:[]}), safeJson("/api/workspace", [])
     ]);
     renderAgent(agentSessions);
-    renderJourney(activity, agentSessions, jobs);
+    renderJourney(journey);
+    renderWorkspace(workspaceItems);
     const mode = controls.global.mode;
     const healthy = metrics.orchestrator?.status === "ok";
     const systemState = $("#systemState");
@@ -562,6 +649,16 @@ $("#pause").onclick = () => setMode(document.body.dataset.mode === "running" ? "
 $("#refreshDesktop").onclick = () => load();
 $("#tabOverview").onclick = () => setView("overview");
 $("#tabTranscript").onclick = () => setView("transcript");
+$("#tabWorkspace").onclick = () => setView("workspace");
+document.querySelector(".view-tabs").addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const tabs = [...document.querySelectorAll(".view-tab")];
+  let index = tabs.indexOf(document.activeElement);
+  if (event.key === "Home") index = 0;
+  else if (event.key === "End") index = tabs.length - 1;
+  else index = (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  event.preventDefault(); tabs[index].focus(); tabs[index].click();
+});
 $("#openTranscript").onclick = () => setView("transcript");
 $("#transcriptMore").onclick = () => loadTranscript();
 document.addEventListener("keydown", (event) => {
@@ -637,5 +734,5 @@ document.querySelector(".brand").addEventListener("click", (event) => {
   setView("overview");
   window.scrollTo({top: 0});
 });
-window.addEventListener("hashchange", () => setView(location.hash === "#transcript" ? "transcript" : "overview"));
-setView(location.hash === "#transcript" ? "transcript" : "overview");
+window.addEventListener("hashchange", () => setView(location.hash === "#transcript" ? "transcript" : location.hash === "#workspace" ? "workspace" : "overview"));
+setView(location.hash === "#transcript" ? "transcript" : location.hash === "#workspace" ? "workspace" : "overview");
