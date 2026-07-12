@@ -298,7 +298,9 @@ def create_app(config: Settings = settings) -> FastAPI:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), geolocation=(), payment=()"
-        if request.url.path.startswith("/novnc/"):
+        if request.url.path.startswith("/novnc/") or request.url.path.startswith(
+            "/static/desktop-viewer"
+        ):
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self' 'unsafe-inline'; "
                 "style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; "
