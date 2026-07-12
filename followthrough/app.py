@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -28,10 +28,6 @@ from .models import (
     CapabilityControlIn,
     CapabilityLimitIn,
     GlobalControlIn,
-    ImprovementEvaluationIn,
-    ImprovementPolicyIn,
-    ImprovementPromotionIn,
-    ImprovementProposalIn,
     InterestWeightIn,
     RelevanceCorrectionIn,
     RoleIn,
@@ -49,8 +45,6 @@ from .relevance import (
     SpeakerContext,
     evaluate_relevance,
 )
-from .security import TokenAuthority, bearer_token
-from .self_improvement import EvalCaseResult, ImprovementManager
 from .store import Store
 
 
@@ -77,8 +71,8 @@ def _omi_audio_delivery_key(
 ) -> str:
     """Derive the stable delivery key omitted by Omi's official audio webhook.
 
-    The caller must authenticate the device token before passing its one-way
-    identity. The payload is bounded by ``max_audio_chunk_bytes`` before its
+    The caller supplies a stable device identity. The payload is bounded by
+    ``max_audio_chunk_bytes`` before its
     digest reaches this helper. Future Omi clients can disambiguate identical
     chunks by supplying a timestamp or sequence without changing the contract.
     """
@@ -252,17 +246,11 @@ def create_app(config: Settings = settings) -> FastAPI:
     store = Store(config.db_path)
     archive_store = ArchiveStore(config.archive_db_path)
     archive = ArchiveStorage(config.audio_dir)
-    authority = TokenAuthority(
-        config.dashboard_token_file, config.device_tokens_dir, config.require_auth
-    )
     crew = Crew(store, config)
     controls = ControlPlane(store)
-    improvements = ImprovementManager(store, config.self_improvement_dir, controls)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        if config.require_auth and not authority.ready():
-            raise RuntimeError("Followthrough authentication secrets are not provisioned")
         yield
 
     application = FastAPI(
@@ -277,10 +265,8 @@ def create_app(config: Settings = settings) -> FastAPI:
     application.state.store = store
     application.state.archive_store = archive_store
     application.state.archive = archive
-    application.state.authority = authority
     application.state.crew = crew
     application.state.controls = controls
-    application.state.improvements = improvements
     application.state.background_tasks = set()
     application.state.transcript_aggregators = {}
     static = Path(__file__).parent / "static"
@@ -300,23 +286,6 @@ def create_app(config: Settings = settings) -> FastAPI:
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
-
-    def token(authorization: str | None) -> str:
-        return bearer_token(authorization)
-
-    def require_dashboard(authorization: str | None) -> None:
-        if not authority.dashboard(token(authorization)):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="dashboard authentication required"
-            )
-
-    def require_device(authorization: str | None) -> str:
-        candidate = token(authorization)
-        if not authority.device(candidate):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="device authentication required"
-            )
-        return hashlib.sha256(candidate.encode()).hexdigest()
 
     async def finish_run(
         run_id: str, event_id: str, transcript: str, classification: Any, allow_owner_report: bool
@@ -582,16 +551,14 @@ def create_app(config: Settings = settings) -> FastAPI:
     async def healthz() -> dict[str, object]:
         database_ready = bool(store.db.execute("SELECT 1").fetchone()[0])
         archive_ready = archive_store.integrity_check()
-        auth_ready = authority.ready() if config.require_auth else True
         orchestrator = store.heartbeat_status("orchestrator") if config.kanban_enabled else None
         return {
-            "ok": database_ready and archive_ready and auth_ready,
+            "ok": database_ready and archive_ready,
             "service": "followthrough",
             "version": "0.2.0",
             "database_ready": database_ready,
             "archive_ready": archive_ready,
-            "auth_ready": auth_ready,
-            "auth_required": config.require_auth,
+            "auth_required": False,
             "hermes_cli_present": shutil.which(config.hermes_bin) is not None,
             "orchestrator": orchestrator,
             "job_counts": store.hermes_job_counts(),
@@ -599,16 +566,10 @@ def create_app(config: Settings = settings) -> FastAPI:
         }
 
     @application.post("/api/v1/transcripts", status_code=202)
-    async def transcript_event(
-        payload: TranscriptEventIn, authorization: str | None = Header(default=None)
-    ) -> dict[str, object]:
-        principal = require_device(authorization)
-        # Bind every accepted event to the one-way identity of the device token.
-        # This value is generated by the server and cannot be selected by the client.
-        payload.metadata["capture_principal"] = principal
+    async def transcript_event(payload: TranscriptEventIn) -> dict[str, object]:
         if not payload.consent:
             raise HTTPException(status_code=400, detail="capture consent flag is required")
-        speaker = SpeakerContext.native_owner(principal)
+        speaker = SpeakerContext.native_owner(payload.device_id)
         aggregate = None
         aggregator = None
         already_archived = archive_store.by_event(payload.event_id) is not None
@@ -660,38 +621,11 @@ def create_app(config: Settings = settings) -> FastAPI:
             }
         return result
 
-    def _authorize_event_principal(archived: dict[str, object], candidate: str) -> None:
-        """Bind an audio operation to the archive event's capture principal.
-
-        A dashboard token may inspect any event. A device token may only reach
-        an event whose server-derived ``capture_principal`` matches its own
-        one-way identity; a mismatch is reported as 404 so ownership of the
-        opaque event id is never disclosed to another valid device.
-        """
-
-        if authority.dashboard(candidate):
-            return
-        principal = hashlib.sha256(candidate.encode()).hexdigest()
-        try:
-            metadata = json.loads(archived["metadata_json"])
-        except (TypeError, json.JSONDecodeError):
-            metadata = {}
-        bound = metadata.get("capture_principal")
-        if bound != principal:
-            raise HTTPException(status_code=404, detail="archive event not found")
-
     @application.get("/api/v1/audio/{event_id}/status")
-    async def audio_status(
-        event_id: str,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, object]:
-        candidate = token(authorization)
-        if not authority.dashboard_or_device(candidate):
-            raise HTTPException(status_code=401, detail="authentication required")
+    async def audio_status(event_id: str) -> dict[str, object]:
         archived = archive_store.by_event(event_id)
         if not archived:
             raise HTTPException(status_code=404, detail="archive event not found")
-        _authorize_event_principal(archived, candidate)
         return {"event_id": event_id, **archive_store.audio_manifest(archived["id"])}
 
     @application.put("/api/v1/audio/{event_id}/{sequence}")
@@ -699,12 +633,10 @@ def create_app(config: Settings = settings) -> FastAPI:
         event_id: str,
         sequence: int,
         request: Request,
-        authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
         x_content_sha256: str | None = Header(default=None),
         content_type: str | None = Header(default="application/octet-stream"),
     ) -> dict[str, object]:
-        require_device(authorization)
         if sequence < 0:
             raise HTTPException(status_code=422, detail="sequence must be non-negative")
         if sequence > config.max_audio_sequence:
@@ -715,7 +647,6 @@ def create_app(config: Settings = settings) -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="transcript event must be ingested before audio"
             )
-        _authorize_event_principal(archived, token(authorization))
         if x_device_id and x_device_id != archived["device_id"]:
             raise HTTPException(status_code=403, detail="device does not own this event")
         content_length = request.headers.get("content-length")
@@ -755,11 +686,7 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.post("/api/signals")
     async def signal(
-        payload: SignalIn, authorization: str | None = Header(default=None)
-    ) -> dict[str, object]:
-        candidate = token(authorization)
-        if not authority.dashboard_or_device(candidate):
-            raise HTTPException(status_code=401, detail="authentication required")
+        payload: SignalIn) -> dict[str, object]:
         if not payload.consent:
             raise HTTPException(status_code=400, detail="explicit consent is required")
         event = TranscriptEventIn(
@@ -777,18 +704,15 @@ def create_app(config: Settings = settings) -> FastAPI:
             store.activate(str(payload.email))
         return await ingest(
             event,
-            speaker=SpeakerContext.native_owner(hashlib.sha256(candidate.encode()).hexdigest()),
+            speaker=SpeakerContext.native_owner("dashboard"),
         )
 
     @application.post("/api/webhooks/omi/transcript", status_code=202)
     async def omi_transcript(
         request: Request,
-        secret: str = Query(default="", alias="token"),
         uid: str = Query(min_length=1, max_length=200),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> dict[str, object]:
-        if not authority.device(secret):
-            raise HTTPException(status_code=401, detail="invalid Omi webhook secret")
         payload = await request.json()
         events = _omi_segment_events(payload, uid, idempotency_key, "transcript")
         receipts = [
@@ -807,12 +731,9 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.post("/api/webhooks/omi/conversation", status_code=202)
     async def omi_conversation(
         request: Request,
-        secret: str = Query(default="", alias="token"),
         uid: str = Query(min_length=1, max_length=200),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> dict[str, object]:
-        if not authority.device(secret):
-            raise HTTPException(status_code=401, detail="invalid Omi webhook secret")
         payload = await request.json()
         events = _omi_segment_events(payload, uid, idempotency_key, "conversation")
         receipts = [
@@ -831,18 +752,13 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.post("/api/webhooks/omi/audio", status_code=202)
     async def omi_audio(
         request: Request,
-        secret: str | None = Query(default=None, alias="token"),
         uid: str = Query(min_length=1, max_length=200),
         sample_rate: int = Query(default=16_000, ge=8_000, le=96_000),
         timestamp: str | None = Query(default=None, max_length=100),
         sequence: str | None = Query(default=None, max_length=100),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         content_type: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
     ) -> dict[str, object]:
-        device_secret = secret or token(authorization) or ""
-        if not authority.device(device_secret):
-            raise HTTPException(status_code=401, detail="invalid Omi webhook secret")
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > config.max_audio_chunk_bytes:
             raise HTTPException(status_code=413, detail="audio chunk exceeds configured limit")
@@ -866,7 +782,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 else "official_omi_unique_delivery"
             )
             idempotency_key = _omi_audio_delivery_key(
-                device_identity=hashlib.sha256(device_secret.encode()).hexdigest(),
+                device_identity=hashlib.sha256(uid.encode()).hexdigest(),
                 uid=uid,
                 sample_rate=sample_rate,
                 payload_digest=digest,
@@ -962,10 +878,8 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.post("/api/webhooks/omi")
     async def omi(
         request: Request,
-        authorization: str | None = Header(default=None),
         x_device_id: str | None = Header(default=None),
     ) -> dict[str, object]:
-        require_device(authorization)
         payload = await request.json()
         if not isinstance(payload, dict):
             raise HTTPException(status_code=422, detail="Omi payload must be a JSON object")
@@ -981,9 +895,8 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.get("/api/relevance/{event_id}")
     async def relevance_decision(
-        event_id: str, authorization: str | None = Header(default=None)
+        event_id: str
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         decision = store.relevance_for_event(event_id)
         if not decision:
             raise HTTPException(status_code=404, detail="relevance decision not found")
@@ -991,18 +904,16 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.post("/api/relevance/interests")
     async def set_interest(
-        payload: InterestWeightIn, authorization: str | None = Header(default=None)
+        payload: InterestWeightIn
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         weight = InterestWeight(payload.category, payload.weight, payload.source)
         store.set_interest_weight(weight)
         return weight.to_dict()
 
     @application.post("/api/relevance/corrections", status_code=202)
     async def correct_relevance(
-        payload: RelevanceCorrectionIn, authorization: str | None = Header(default=None)
+        payload: RelevanceCorrectionIn
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         archived = archive_store.by_event(payload.event_id)
         decision = store.relevance_for_event(payload.event_id)
         if not archived or not decision:
@@ -1091,29 +1002,17 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.get("/api/memory/operational")
     async def operational_memory(
-        authorization: str | None = Header(default=None),
     ) -> list[dict[str, object]]:
-        require_dashboard(authorization)
         return store.list_operational_memories()
 
     @application.get("/api/jobs")
-    async def jobs(authorization: str | None = Header(default=None)) -> list[dict[str, object]]:
-        require_dashboard(authorization)
+    async def jobs() -> list[dict[str, object]]:
         return store.list_hermes_jobs()
 
     @application.get("/api/v1/jobs/{job_id}")
-    async def device_job(
-        job_id: str,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, object]:
-        principal = require_device(authorization)
+    async def device_job(job_id: str) -> dict[str, object]:
         job = store.hermes_job(job_id)
         if not job:
-            raise HTTPException(status_code=404, detail="job not found")
-        archived = archive_store.by_id(job["archive_id"])
-        metadata = json.loads(archived["metadata_json"]) if archived else {}
-        if metadata.get("capture_principal") != principal:
-            # Do not disclose whether another device owns the opaque identifier.
             raise HTTPException(status_code=404, detail="job not found")
         run = store.get_run(job["run_id"])
         summary = (run or {}).get("summary") or job.get("latest_outcome")
@@ -1130,22 +1029,18 @@ def create_app(config: Settings = settings) -> FastAPI:
         }
 
     @application.get("/api/controls")
-    async def control_status(authorization: str | None = Header(default=None)) -> dict[str, object]:
-        require_dashboard(authorization)
+    async def control_status() -> dict[str, object]:
         return controls.status()
 
     @application.get("/api/controls/audit")
     async def control_audit(
-        authorization: str | None = Header(default=None),
     ) -> list[dict[str, object]]:
-        require_dashboard(authorization)
         return controls.audit_log()
 
     @application.post("/api/controls/global")
     async def change_global_control(
-        payload: GlobalControlIn, authorization: str | None = Header(default=None)
+        payload: GlobalControlIn
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         return controls.set_global_mode(
             payload.mode,
             actor=payload.actor,
@@ -1155,18 +1050,15 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.post("/api/controls/safe-mode")
     async def activate_safe_mode(
-        payload: SafeModeIn, authorization: str | None = Header(default=None)
+        payload: SafeModeIn
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         return controls.trigger_safe_mode(payload.trigger, actor=payload.actor)
 
     @application.post("/api/controls/capabilities/{capability}")
     async def change_capability(
         capability: str,
         payload: CapabilityControlIn,
-        authorization: str | None = Header(default=None),
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         try:
             return controls.set_capability(
                 capability,
@@ -1182,9 +1074,7 @@ def create_app(config: Settings = settings) -> FastAPI:
     async def change_capability_limit(
         capability: str,
         payload: CapabilityLimitIn,
-        authorization: str | None = Header(default=None),
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         try:
             return controls.set_limit(
                 capability,
@@ -1199,129 +1089,48 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.post("/api/controls/jobs/{run_id}/park")
     async def park_job(
-        run_id: str, payload: TaskControlIn, authorization: str | None = Header(default=None)
+        run_id: str, payload: TaskControlIn
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         return controls.park_run(run_id, actor=payload.actor, reason_code=payload.reason_code)
 
     @application.post("/api/controls/jobs/resume")
     async def resume_jobs(
-        payload: TaskControlIn, authorization: str | None = Header(default=None)
+        payload: TaskControlIn
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         return controls.resume_parked(actor=payload.actor, reason_code=payload.reason_code)
-
-    @application.get("/api/self-improvement")
-    async def improvement_status(
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, object]:
-        require_dashboard(authorization)
-        return {"policy": improvements.policy(), "proposals": improvements.list_proposals()}
-
-    @application.post("/api/self-improvement/proposals", status_code=202)
-    async def propose_improvement(
-        payload: ImprovementProposalIn, authorization: str | None = Header(default=None)
-    ) -> dict[str, object]:
-        require_dashboard(authorization)
-        try:
-            return improvements.propose(
-                target=payload.target,
-                content=payload.content,
-                evidence=[item.model_dump() for item in payload.evidence],
-                created_by=payload.created_by,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    @application.post("/api/self-improvement/proposals/{proposal_id}/evaluate")
-    async def evaluate_improvement(
-        proposal_id: str,
-        payload: ImprovementEvaluationIn,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, object]:
-        require_dashboard(authorization)
-        try:
-            return improvements.evaluate(
-                proposal_id,
-                evaluator_id=payload.evaluator_id,
-                held_in=(EvalCaseResult(**case.model_dump()) for case in payload.held_in),
-                held_out=(EvalCaseResult(**case.model_dump()) for case in payload.held_out),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @application.put("/api/self-improvement/policy")
-    async def configure_improvement_policy(
-        payload: ImprovementPolicyIn, authorization: str | None = Header(default=None)
-    ) -> dict[str, object]:
-        require_dashboard(authorization)
-        try:
-            return improvements.configure_live_policy(
-                live_enabled=payload.live_enabled,
-                allowed_roots=payload.allowed_roots,
-                required_approver_prefix=payload.required_approver_prefix,
-                actor=payload.actor,
-            )
-        except (ValueError, PermissionError) as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-
-    @application.post("/api/self-improvement/proposals/{proposal_id}/promote")
-    async def promote_improvement(
-        proposal_id: str,
-        payload: ImprovementPromotionIn,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, object]:
-        require_dashboard(authorization)
-        try:
-            return improvements.promote(
-                proposal_id,
-                approved_by=payload.approved_by,
-                approval_reference=payload.approval_reference,
-                live_root=payload.live_root,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @application.post("/api/signup")
     async def signup(
-        payload: SignupIn, authorization: str | None = Header(default=None)
+        payload: SignupIn
     ) -> dict[str, bool]:
-        require_dashboard(authorization)
         store.signup(str(payload.email), payload.source)
         return {"ok": True}
 
     @application.post("/api/roles")
     async def add_role(
-        payload: RoleIn, authorization: str | None = Header(default=None)
+        payload: RoleIn
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         return store.add_role(payload.name, payload.job, payload.tools, payload.guardrails)
 
     @application.get("/api/roles")
-    async def roles(authorization: str | None = Header(default=None)) -> list[dict[str, object]]:
-        require_dashboard(authorization)
+    async def roles() -> list[dict[str, object]]:
         return store.roles()
 
     @application.get("/api/runs")
-    async def runs(authorization: str | None = Header(default=None)) -> list[dict[str, object]]:
-        require_dashboard(authorization)
+    async def runs() -> list[dict[str, object]]:
         return store.list_runs()
 
     @application.get("/api/runs/{run_id}")
     async def run(
-        run_id: str, authorization: str | None = Header(default=None)
+        run_id: str
     ) -> dict[str, object]:
-        require_dashboard(authorization)
         found = store.get_run(run_id)
         if not found:
             raise HTTPException(status_code=404, detail="run not found")
         return found
 
     @application.get("/api/metrics")
-    async def metrics(authorization: str | None = Header(default=None)) -> dict[str, object]:
-        require_dashboard(authorization)
+    async def metrics() -> dict[str, object]:
         return {
             **store.metrics(),
             **archive_store.metrics(),
@@ -1338,9 +1147,7 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.get("/api/activity")
     async def activity(
-        authorization: str | None = Header(default=None),
     ) -> list[dict[str, object]]:
-        require_dashboard(authorization)
         result: list[dict[str, object]] = []
         for event in archive_store.recent_events(24):
             try:
@@ -1364,9 +1171,8 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.get("/api/audio/{filename}")
     async def audio(
-        filename: str, authorization: str | None = Header(default=None)
+        filename: str
     ) -> FileResponse:
-        require_dashboard(authorization)
         path = _safe_child(config.reports_dir.parent / "audio", filename)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="audio not found")
@@ -1374,17 +1180,15 @@ def create_app(config: Settings = settings) -> FastAPI:
 
     @application.get("/api/reports/{filename}")
     async def report(
-        filename: str, authorization: str | None = Header(default=None)
+        filename: str
     ) -> FileResponse:
-        require_dashboard(authorization)
         path = _safe_child(config.reports_dir, filename)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="report not found")
         return FileResponse(path, media_type="text/markdown")
 
     @application.get("/api/events")
-    async def events(authorization: str | None = Header(default=None)) -> StreamingResponse:
-        require_dashboard(authorization)
+    async def events() -> StreamingResponse:
         return StreamingResponse(bus.stream(), media_type="text/event-stream")
 
     return application

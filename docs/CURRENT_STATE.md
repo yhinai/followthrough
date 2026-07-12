@@ -1,18 +1,19 @@
 # Current state
 
-Verified 2026-07-11 PDT. This document supersedes stale runtime statements in older evidence snapshots; historical evidence remains unchanged.
+Verified 2026-07-12 PDT. This document describes the intentionally simple,
+tokenless test deployment currently running on Spark.
 
 ## Shipped path
 
 ```text
 Memo Android microphone
-  -> authenticated audio and finalized transcripts
+  -> audio and finalized transcripts
   -> https://followthrough.alhinai.dev
   -> complete local archive on Spark
   -> deterministic relevance and aggregation
   -> relevant-only durable Hermes Kanban job
   -> research / sandbox test / typed effect
-  -> sanitized authenticated job status
+  -> sanitized job status
   -> Memo polling and spoken phone-speaker result
 ```
 
@@ -20,17 +21,17 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 
 ## Verified runtime
 
-- Public health endpoint and Followthrough, orchestrator, Cloudflare tunnel, and soak services are active.
-- Followthrough Python suite: 180 passed after orchestration durability and scanner hardening.
+- Public health endpoint, Followthrough, orchestrator, and Cloudflare tunnel are active.
+- Public health reports `auth_required: false`; there are no Followthrough token files, token middleware, or dashboard token prompts.
+- Followthrough Python suite: 150 passed after the lean-runtime cleanup.
 - Memo Android build: successful on OpenJDK 17.
 - Samsung `SM-F776U1`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified.
-- OnePlus `CPH2513`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified while connected as ADB serial `31e0272e`.
 
 ## Two-way contract
 
 - `POST /api/v1/transcripts` returns `job_id` for actionable signals.
 - `GET /api/v1/jobs/{job_id}` returns only a sanitized status/result.
-- The server binds each event to a server-derived hash of the device credential. Another valid device token receives `404`.
+- The test deployment is intentionally tokenless. Memo needs only the HTTPS endpoint.
 - Memo persists pending IDs in Android preferences and resumes polling after restart.
 - Terminal states are `completed`, `dead_letter`, `needs_attention`, and `cancelled`.
 - Hermes run summaries are persisted to the Followthrough run and returned to Memo; Gemini Live speaks the result.
@@ -52,10 +53,13 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 
 ## Current revisions
 
-- Followthrough: `3eb20da` (`Return Hermes summaries to submitting devices`).
-- Memo: `8026daa` (`Route Memo voice responses through phone speaker`).
+- Followthrough: branch `main`; this document is shipped with the lean tokenless runtime revision.
+- Memo: branch `main`; the installed Samsung build includes restart-safe result polling, speaker routing, and tokenless Followthrough configuration.
 - GitHub targets: `yhinai/followthrough` and `yhinai/memo`, branch `main`.
 
 ## Remaining acceptance work
 
-The product is operational. Final acceptance requires a physical no-repair voice run that identifies its target correctly and completes phone-to-Spark-to-phone without operator correction. Long-running soak monitoring is optional diagnostic evidence, not a completion gate.
+The product is operational. The physical Samsung has verified continuous audio,
+finalized transcript ingestion, completed Hermes research, restart-safe result
+recovery, and built-in-speaker routing. A fresh spoken actionable phrase remains
+the recommended final demo rehearsal; it is not a soak requirement.

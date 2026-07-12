@@ -28,12 +28,7 @@ class Settings(BaseSettings):
     effect_policy_file: Path = Path.home() / ".config" / "followthrough" / "effect-policy.json"
     google_token_file: Path = Path.home() / ".hermes" / "user" / "google-workspace" / "google_token.json"
     google_client_secret_file: Path = Path.home() / ".hermes" / "user" / "google-workspace" / "google_client_secret.json"
-    self_improvement_dir: Path = ROOT / "data" / "self-improvement"
     audio_dir: Path = ROOT / "data" / "archive" / "audio"
-    secrets_dir: Path = Path.home() / ".config" / "followthrough"
-    dashboard_token_file: Path = Path.home() / ".config" / "followthrough" / "dashboard.token"
-    device_tokens_dir: Path = Path.home() / ".config" / "followthrough" / "devices"
-    require_auth: bool = True
     max_transcript_bytes: int = 65_536
     max_audio_chunk_bytes: int = 8_388_608
     # Upper bound on a single event's audio chunk index. Bounds the manifest's
@@ -72,11 +67,7 @@ class Settings(BaseSettings):
         self.effect_policy_file = Path(self.effect_policy_file).expanduser().resolve()
         self.google_token_file = Path(self.google_token_file).expanduser().resolve()
         self.google_client_secret_file = Path(self.google_client_secret_file).expanduser().resolve()
-        self.self_improvement_dir = Path(self.self_improvement_dir).expanduser().resolve()
         self.audio_dir = Path(self.audio_dir).expanduser().resolve()
-        self.secrets_dir = Path(self.secrets_dir).expanduser().resolve()
-        self.dashboard_token_file = Path(self.dashboard_token_file).expanduser().resolve()
-        self.device_tokens_dir = Path(self.device_tokens_dir).expanduser().resolve()
         self.hermes_python = Path(self.hermes_python).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.archive_db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +76,6 @@ class Settings(BaseSettings):
         self.runner_dir.mkdir(parents=True, exist_ok=True)
         self.runner_receipts_dir.mkdir(parents=True, exist_ok=True)
         self.effects_dir.mkdir(parents=True, exist_ok=True)
-        self.self_improvement_dir.mkdir(parents=True, exist_ok=True)
         self.audio_dir.mkdir(parents=True, exist_ok=True)
 
 

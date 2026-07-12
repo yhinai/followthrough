@@ -2,8 +2,8 @@
 
 This module is intentionally side-effect free.  It does not call Hermes, store raw
 transcripts, or access external services.  Callers may archive the original content
-separately, but only an owner-verified or authenticated ambient Omi result can produce
-a Hermes envelope.
+separately, but only an owner-attributed or explicitly dispatchable ambient result can
+produce a Hermes envelope.
 """
 
 from __future__ import annotations
@@ -63,10 +63,9 @@ class SpeakerContext:
 
     ``is_user`` is trusted only for Omi provenance and only when it is an actual
     boolean.  Native owner status is trusted only when the adapter has already
-    authenticated the principal and sets ``authenticated_owner`` explicitly.
-    ``ambient_authorized`` is a separate capture-channel authorization and is
-    honored only for Omi provenance; webhook adapters must set it only after
-    authenticating the device token.
+    attributed the speaker and sets ``authenticated_owner`` explicitly. The field
+    name is retained for stored-record compatibility. ``ambient_authorized`` is a
+    separate capture-channel dispatch claim honored only for Omi provenance.
     """
 
     provenance: Provenance = Provenance.UNKNOWN
@@ -479,10 +478,10 @@ def _speaker_assessment(context: SpeakerContext) -> tuple[OwnerStatus, float, Ev
                 OwnerStatus.OWNER,
                 0.99,
                 Evidence(
-                    "speaker.native_authenticated_owner",
+                    "speaker.native_app_owner",
                     None,
                     0.99,
-                    "Native adapter authenticated the owner",
+                    "Native app attributed the speaker to the owner",
                 ),
             )
         if context.authenticated_owner is False:
@@ -490,17 +489,17 @@ def _speaker_assessment(context: SpeakerContext) -> tuple[OwnerStatus, float, Ev
                 OwnerStatus.NON_OWNER,
                 0.99,
                 Evidence(
-                    "speaker.native_authenticated_other",
+                    "speaker.native_app_other",
                     None,
                     0.99,
-                    "Native adapter authenticated a non-owner",
+                    "Native app attributed the speaker to a non-owner",
                 ),
             )
 
     return (
         OwnerStatus.UNKNOWN,
         0.99,
-        Evidence("speaker.unknown", None, 0.99, "No authenticated owner provenance"),
+        Evidence("speaker.unknown", None, 0.99, "No owner attribution provenance"),
     )
 
 
@@ -547,10 +546,10 @@ def evaluate_relevance(
     if ambient_authorized:
         speaker_evidence += (
             Evidence(
-                "speaker.omi_authenticated_ambient",
+                "speaker.omi_dispatchable_ambient",
                 None,
                 0.99,
-                "The Omi capture channel was authenticated for ambient dispatch",
+                "The Omi capture channel was marked dispatchable",
             ),
         )
     categories, evidence = _category_evidence(clean)

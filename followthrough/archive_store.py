@@ -67,13 +67,6 @@ class ArchiveStore:
                     previous = json.loads(existing["metadata_json"])
                     hooks = sorted(set(previous.get("observed_hooks", [])) | set(metadata.get("observed_hooks", [])) | {value for value in (previous.get("hook"), metadata.get("hook")) if value})
                     merged = {**previous, **metadata, "observed_hooks": hooks}
-                    # The capture principal is the server-derived authorization
-                    # binding for the device job-return channel. A later delivery
-                    # of the same content (e.g. a second phone hearing the same
-                    # utterance) must never be able to reassign ownership, so the
-                    # first-writer principal is preserved.
-                    if "capture_principal" in previous:
-                        merged["capture_principal"] = previous["capture_principal"]
                     self.db.execute("UPDATE archive_events SET metadata_json=? WHERE id=?", (json.dumps(merged, default=str), existing["id"]))
                     self.db.commit()
                     existing = self.db.execute("SELECT * FROM archive_events WHERE id=?", (existing["id"],)).fetchone()

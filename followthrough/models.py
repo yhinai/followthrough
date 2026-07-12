@@ -99,43 +99,6 @@ class SafeModeIn(BaseModel):
     actor: str = Field(default="owner:dashboard", min_length=3, max_length=120)
 
 
-class ImprovementEvidenceIn(BaseModel):
-    path: str = Field(min_length=1, max_length=1000)
-    sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
-
-
-class ImprovementProposalIn(BaseModel):
-    target: str = Field(min_length=1, max_length=300)
-    content: str = Field(min_length=1, max_length=1_048_576)
-    evidence: list[ImprovementEvidenceIn] = Field(min_length=1, max_length=50)
-    created_by: str = Field(default="hermes:candidate-generator", min_length=3, max_length=120)
-
-
-class ImprovementEvalCaseIn(BaseModel):
-    case_id: str = Field(min_length=1, max_length=120)
-    baseline_passed: bool
-    candidate_passed: bool
-
-
-class ImprovementEvaluationIn(BaseModel):
-    evaluator_id: str = Field(default="deterministic:followthrough-v1", min_length=3, max_length=120)
-    held_in: list[ImprovementEvalCaseIn] = Field(min_length=1, max_length=1000)
-    held_out: list[ImprovementEvalCaseIn] = Field(min_length=1, max_length=1000)
-
-
-class ImprovementPolicyIn(BaseModel):
-    live_enabled: bool = False
-    allowed_roots: list[str] = Field(default_factory=list, max_length=10)
-    required_approver_prefix: str = Field(default="owner:", min_length=6, max_length=40)
-    actor: str = Field(default="owner:dashboard", min_length=6, max_length=120)
-
-
-class ImprovementPromotionIn(BaseModel):
-    approved_by: str = Field(min_length=3, max_length=120)
-    approval_reference: str = Field(min_length=8, max_length=160)
-    live_root: str | None = Field(default=None, max_length=1000)
-
-
 class StepView(BaseModel):
     id: str
     run_id: str

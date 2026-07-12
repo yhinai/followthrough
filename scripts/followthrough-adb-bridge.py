@@ -11,11 +11,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Bridge Omi on-device Whisper logs into Followthrough")
     parser.add_argument("--serial", default="100.96.0.1:40785")
     parser.add_argument(
-        "--token-file",
-        type=Path,
-        default=Path.home() / ".config" / "followthrough" / "devices" / "omi-primary.token",
-    )
-    parser.add_argument(
         "--receipts",
         type=Path,
         default=Path("data/phone-bridge/receipts.jsonl"),
@@ -23,7 +18,6 @@ def main() -> None:
     args = parser.parse_args()
     AdbTranscriptBridge(
         serial=args.serial,
-        token_file=args.token_file,
         receipts=args.receipts,
     ).run_forever()
 

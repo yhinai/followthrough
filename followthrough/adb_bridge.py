@@ -145,13 +145,11 @@ class AdbTranscriptBridge:
         self,
         *,
         serial: str,
-        token_file: Path,
         endpoint: str = "http://127.0.0.1:18765/api/v1/transcripts",
         adb: str = "/usr/bin/adb",
         receipts: Path | None = None,
     ) -> None:
         self.serial = serial
-        self.token_file = token_file
         self.endpoint = endpoint
         self.adb = adb
         self.receipts = receipts
@@ -166,11 +164,9 @@ class AdbTranscriptBridge:
         os.chmod(self.receipts, 0o600)
 
     def deliver(self, transcript: Transcript) -> dict[str, object]:
-        token = self.token_file.read_text().strip() if self.token_file.is_file() else ""
         started = time.monotonic()
         response = httpx.post(
             self.endpoint,
-            headers={"Authorization": f"Bearer {token}"} if token else {},
             json={
                 "event_id": transcript.event_id,
                 "device_id": self.serial,

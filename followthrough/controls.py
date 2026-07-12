@@ -32,7 +32,6 @@ class Capability(StrEnum):
     SESSIONS = "sessions"
     DEPLOYMENTS = "deployments"
     REPOSITORY_EXECUTION = "repository_execution"
-    SELF_IMPROVEMENT = "self_improvement"
     ROLLBACK = "rollback"
 
 
@@ -44,7 +43,6 @@ DEFAULT_LIMITS: dict[Capability, tuple[int | None, int, float | None]] = {
     Capability.SESSIONS: (30, 3_600, None),
     Capability.DEPLOYMENTS: (10, 86_400, None),
     Capability.REPOSITORY_EXECUTION: (30, 3_600, None),
-    Capability.SELF_IMPROVEMENT: (4, 86_400, None),
     Capability.ROLLBACK: (100, 86_400, None),
 }
 

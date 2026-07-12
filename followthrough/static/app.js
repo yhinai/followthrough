@@ -4,21 +4,8 @@ let browserListening = false;
 let recognition = null;
 let lastActivityId = null;
 
-function dashboardToken() {
-  return (localStorage.getItem("followthrough_dashboard_token") || "").trim();
-}
-
-async function api(path, options = {}, retry = true) {
-  const headers = new Headers(options.headers || {});
-  const token = dashboardToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(path, {...options, headers});
-  if (response.status === 401 && retry) {
-    localStorage.removeItem("followthrough_dashboard_token");
-    const value = (window.prompt("Enter your Followthrough dashboard token") || "").trim();
-    if (value) localStorage.setItem("followthrough_dashboard_token", value);
-    return api(path, options, false);
-  }
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
   if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);
   return response;
 }
@@ -118,7 +105,7 @@ async function load() {
     $("#memoryCount").textContent = `Live · ${memories.length} items`;
     $("#memories").innerHTML = memories.length ? memories.slice(0,7).map(memoryCard).join("") : '<div class="empty-state">Nothing promoted yet.</div>';
   } catch (error) {
-    $("#systemState").textContent = `Owner authentication required · ${error.message}`;
+    $("#systemState").textContent = `Server unreachable · ${error.message}`;
   }
 }
 

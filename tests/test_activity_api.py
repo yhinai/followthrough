@@ -19,7 +19,6 @@ def test_owner_activity_feed_reads_recent_transcripts(configured_settings) -> No
             },
         )
         assert response.status_code == 202
-        assert client.get("/api/activity").status_code == 401
         activity = client.get(
             "/api/activity",
             headers={"Authorization": f"Bearer {dashboard_token}"},

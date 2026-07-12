@@ -1,19 +1,12 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -u
 
-TOKEN_FILE="$HOME/.followthrough-device-token"
 ENDPOINT="https://followthrough.alhinai.dev/api/webhooks/omi/audio"
 DEVICE_ID="flip-termux-audio"
 STATE_DIR="$HOME/.local/state/followthrough-audio"
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 
-if [[ ! -s "$TOKEN_FILE" ]]; then
-  printf 'missing token file: %s\n' "$TOKEN_FILE" >&2
-  exit 1
-fi
-
-token=$(<"$TOKEN_FILE")
 trap 'termux-microphone-record -q >/dev/null 2>&1 || true; exit 0' TERM INT
 
 while true; do
@@ -26,7 +19,6 @@ while true; do
     code=$(curl --silent --show-error --output "$STATE_DIR/last-response.json" \
       --write-out '%{http_code}' --max-time 20 --request POST \
       "$ENDPOINT?uid=$DEVICE_ID&timestamp=$stamp" \
-      --header "Authorization: Bearer $token" \
       --header 'Content-Type: audio/mp4' --data-binary "@$chunk" || true)
     printf '%s code=%s bytes=%s\n' "$stamp" "$code" "$(wc -c <"$chunk")" \
       >> "$STATE_DIR/receipts.log"

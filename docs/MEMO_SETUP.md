@@ -1,6 +1,6 @@
 # Memo Android sensor
 
-Memo is the primary phone sensor for Followthrough. Omi and the Termux uploader are no longer part of the active runtime path. Memo now provides the complete two-way loop: audio/transcript upload, durable job receipt, restart-safe status polling, and spoken Hermes results through the built-in phone speaker. Samsung SM-F776U1 and OnePlus CPH2513 have both been verified; see [CURRENT_STATE.md](CURRENT_STATE.md).
+Memo is the primary phone sensor for Followthrough. Omi and the Termux uploader are not part of the active runtime path. Memo provides the complete two-way loop: audio/transcript upload, durable job receipt, restart-safe status polling, and spoken Hermes results through the built-in phone speaker. The Samsung SM-F776U1 is the supported test phone; see [CURRENT_STATE.md](CURRENT_STATE.md).
 
 ## Runtime path
 
@@ -12,7 +12,7 @@ Samsung Flip microphone
   -> complete local archive
   -> relevance gate
   -> relevant-only Hermes job
-  -> authenticated status/result polling
+  -> tokenless status/result polling
   -> phone loudspeaker response (plus Discord when enabled)
 ```
 
@@ -22,15 +22,14 @@ Samsung Flip microphone
 - Mac checkout: `/Users/alhinai/Projects/memo`
 - Android project: `/Users/alhinai/Projects/memo/samples/CameraAccessAndroid`
 - Package: `com.meta.wearable.dat.externalsampleapps.cameraaccess`
-- Build token: pass the private device token as Gradle property `followthrough_token` or place it in the ignored `local.properties` file.
 
-The endpoint defaults to `https://followthrough.alhinai.dev`. Endpoint, token, and continuous-archive enablement are also available in the Memo Settings screen.
+The endpoint defaults to `https://followthrough.alhinai.dev`. Endpoint and continuous-archive enablement are available in the Memo Settings screen. No Followthrough token is needed or stored.
 
 ## Verified phone
 
 - Model: Samsung SM-F776U1
 - USB serial on Mac: `R3GL40M4XXV`
-- Current network ADB path from Spark: `100.96.0.1:5555`
+- Wireless ADB is kept alive by the Mac bridge; use `adb devices` on the Mac to see the current LAN and private addresses.
 - Foreground service: `AlwaysListeningService`
 
 ## Replacement state
@@ -42,4 +41,4 @@ The endpoint defaults to `https://followthrough.alhinai.dev`. Endpoint, token, a
 - Followthrough accepted real Memo PCM audio and finalized transcripts.
 - Audio continued after the app left the foreground.
 
-Do not uninstall Omi until Memo completes a longer soak; retaining the inactive package preserves a rollback path without allowing it to capture.
+Omi may remain installed as an inactive rollback option, but Memo is the only active capture path.

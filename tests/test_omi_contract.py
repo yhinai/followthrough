@@ -31,7 +31,6 @@ def test_official_omi_transcript_shapes_and_speaker_aliases(configured_settings)
     }
     array_payload = [{"id": "seg-array", "text": "Lunch was good", "speakerId": 0, "is_user": True}]
     with TestClient(app) as client:
-        assert client.post("/api/webhooks/omi/transcript?token=wrong&uid=uid-1", json=object_payload).status_code == 401
         started = time.perf_counter()
         response = client.post(f"/api/webhooks/omi/transcript?token={device_token}&uid=uid-1", headers={"Idempotency-Key": "delivery-1"}, json=object_payload)
         assert time.perf_counter() - started < 0.5
