@@ -27,7 +27,13 @@ parking/resumption, held-out regression rejection, protected-evaluator target
 rejection, post-evaluation tamper rejection, explicit live owner approval, and
 rollback.
 
-Boundary: the shared live systemd services were not restarted as part of this
-implementation subtask. The deterministic gate passes; the installed-service
-park latency still needs a live reload-and-RTO receipt before P6 is marked
-fully accepted.
+The initial implementation subtask did not restart the shared services. The
+later installed-service acceptance run closed that boundary with a 6.14-second
+pause and a 5.236-second least-authority resume, both inside the 10-second RTO.
+
+## Current post-reset candidate proof
+
+- Proposal `5d5d7efe-c187-474a-b7cf-cc9b420526d7` was generated for bounded ambient-command aggregation.
+- Every deterministic gate passed: candidate integrity, safe target, unsafe-content scan, evidence digest, pinned evaluator, held-in cases, and held-out no-regression cases.
+- Live promotion remains disabled. The approved artifact was promoted only to the isolated staged directory with status `promoted_staged`; no Hermes skill or runtime file was changed.
+- Audit receipts: proposal `29c6f97c-3a18-490f-b6e0-f5f3db1e83dd`; evaluation `32d16fcc-533d-4ae1-9d5f-5d3a2b730c1e`.
