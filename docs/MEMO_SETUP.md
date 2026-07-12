@@ -33,7 +33,7 @@ The endpoint defaults to `https://followthrough.alhinai.dev`. Endpoint, token, a
 
 ## Replacement state
 
-- Omi process stopped.
+- Omi (`com.friend.ios`) process stopped and microphone permission revoked.
 - Termux audio uploader stopped.
 - Legacy `followthrough-adb-bridge.service` disabled and stopped.
 - Memo foreground microphone service active.
