@@ -188,14 +188,9 @@ def test_create_goal_uses_supplied_supersession_idempotency_key(tmp_path: Path) 
     assert receipt.idempotency_key == key
 
 
-def test_discord_subscription_is_verified_and_inspection_commands_are_json() -> None:
+def test_inspection_commands_are_json() -> None:
     runner = FakeRunner(
         [
-            completed("subscribed\n"),
-            completed(
-                '{"subscriptions":[{"platform":"discord","chat_id":"123",'
-                '"user_id":"456","notifier_profile":"default"}]}'
-            ),
             completed('{"task":{"id":"task-7","status":"blocked"}}'),
             completed('{"runs":[{"id":"r1","outcome":"gave_up"}]}'),
             completed('{"diagnostics":[{"code":"retries_exhausted"}]}'),
@@ -203,30 +198,14 @@ def test_discord_subscription_is_verified_and_inspection_commands_are_json() -> 
     )
     client = HermesKanbanClient(runner=runner)
 
-    subscription = client.subscribe_discord(task_id="task-7", chat_id="123", user_id="456")
     task = client.show_task("task-7")
     runs = client.task_runs("task-7")
     diagnostics = client.diagnostics("task-7")
 
-    assert subscription["platform"] == "discord"
     assert task["status"] == "blocked"
     assert runs[-1]["outcome"] == "gave_up"
     assert diagnostics == {"diagnostics": [{"code": "retries_exhausted"}]}
-    assert runner.calls[0][0][3:] == [
-        "kanban",
-        "--board",
-        "followthrough",
-        "notify-subscribe",
-        "task-7",
-        "--platform",
-        "discord",
-        "--chat-id",
-        "123",
-        "--user-id",
-        "456",
-        "--notifier-profile",
-        "default",
-    ]
+    assert runner.calls[0][0][-1] == "--json"
     assert runner.calls[-1][0][3:] == [
         "kanban",
         "--board",
@@ -334,8 +313,10 @@ class FakeStore:
             {
                 "run_id": "run-1",
                 "task_id": "task-1",
-                "discord_chat_id": "123",
-                "discord_user_id": "456",
+                "discord_chat_id": "12345",
+                "event_id": "event-12345678",
+                "entity": "Gold price today",
+                "result_summary": "Gold price research completed.",
             }
         ]
         self.active_rows: list[Mapping[str, object]] = [
@@ -361,9 +342,9 @@ class FakeStore:
         return self.notification_rows[:limit]
 
     def kanban_record_notified(
-        self, run_id: str, *, subscription: Mapping[str, str]
+        self, run_id: str, *, receipt: Mapping[str, str]
     ) -> None:
-        self.notified.append((run_id, dict(subscription)))
+        self.notified.append((run_id, dict(receipt)))
 
     def kanban_record_notification_failure(self, run_id: str, *, error: str) -> None:
         self.failures.append(("notify", run_id, error))
@@ -404,17 +385,6 @@ class FakeClient:
             payload={"id": "task-1", "status": "ready"},
         )
 
-    def subscribe_discord(
-        self, *, task_id: str, chat_id: str, user_id: str | None = None
-    ) -> Mapping[str, Any]:
-        return {
-            "platform": "discord",
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "notifier_profile": "default",
-            "display_name": SECRET_TRANSCRIPT,
-        }
-
     def show_task(self, task_id: str) -> dict[str, Any]:
         return {"id": task_id, "status": "blocked", "body": SECRET_TRANSCRIPT}
 
@@ -440,16 +410,11 @@ def test_orchestrator_creates_notifies_and_reconciles_without_raw_text(tmp_path:
 
     result = orchestrator.run_once()
 
-    assert result == {"created": 1, "notified": 1, "reconciled": 1, "errors": []}
+    assert result == {"created": 1, "notified": 0, "reconciled": 1, "errors": []}
     assert client.board_calls == 1
     assert store.failures == []
     assert store.created[0][1]["idempotency_key"] == "followthrough:archive-1:research:v3"
-    assert store.notified[0][1] == {
-        "platform": "discord",
-        "chat_id": "123",
-        "user_id": "456",
-        "notifier_profile": "default",
-    }
+    assert store.notified == []
     assert store.reconciled[0][1]["state"] == "dead_letter"
     assert store.reconciled[0][1]["latest_outcome"] == "gave_up"
     assert store.reconciled[0][1]["diagnostics"] == ("retries_exhausted",)
@@ -496,6 +461,37 @@ class FailOnceEffectService(FakeEffectService):
         if len(self.calls) == 1:
             raise RuntimeError("temporary provider outage")
         return {"state": "completed"}
+
+
+class AlwaysFailEffectService(FakeEffectService):
+    def submit(self, request: Any, *, idempotency_key: str, execute: bool) -> dict[str, Any]:
+        self.calls.append((request, idempotency_key, execute))
+        raise RuntimeError(SECRET_TRANSCRIPT)
+
+
+def test_completed_result_is_sent_to_discord_through_typed_effector(tmp_path: Path) -> None:
+    store = FakeStore()
+    store.create_rows = []
+    store.active_rows = []
+    effects = FakeEffectService()
+    orchestrator = DurableOrchestrator(
+        client=FakeClient(),  # type: ignore[arg-type]
+        store=store,
+        capsule_writer=CapsuleWriter(tmp_path),
+        effect_service=effects,  # type: ignore[arg-type]
+    )
+
+    result = orchestrator.run_once()
+
+    assert result["notified"] == 1
+    request, idempotency_key, execute = effects.calls[0]
+    assert request.kind == EffectKind.DISCORD_MESSAGE_SEND
+    assert request.target == "discord:12345"
+    assert request.body.startswith("**Gold price today**")
+    assert "Gold price research completed." in request.body
+    assert idempotency_key == "followthrough:event-12345678:result:discord:v1"
+    assert execute is True
+    assert store.notified == [("run-1", {"effect_id": "unknown", "state": "delivered"})]
 
 
 def test_completed_card_dispatches_typed_effect_with_event_bound_idempotency(
@@ -581,21 +577,15 @@ def test_orchestrator_parks_card_when_local_state_changed_during_create(tmp_path
     assert client.parked == [("task-1", "state_changed_during_create")]
 
 
-class NotificationFailureClient(FakeClient):
-    def subscribe_discord(
-        self, *, task_id: str, chat_id: str, user_id: str | None = None
-    ) -> Mapping[str, Any]:
-        raise RuntimeError(SECRET_TRANSCRIPT)
-
-
 def test_notification_failure_is_sanitized_and_left_for_durable_retry(tmp_path: Path) -> None:
     store = FakeStore()
     store.create_rows = []
     store.active_rows = []
     orchestrator = DurableOrchestrator(
-        client=NotificationFailureClient(),  # type: ignore[arg-type]
+        client=FakeClient(),  # type: ignore[arg-type]
         store=store,
         capsule_writer=CapsuleWriter(tmp_path),
+        effect_service=AlwaysFailEffectService(),  # type: ignore[arg-type]
     )
 
     result = orchestrator.run_once()

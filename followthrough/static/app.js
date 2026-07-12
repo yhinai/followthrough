@@ -251,7 +251,8 @@ function memoryCard(item) {
 }
 
 function renderCurrentJob(jobs, activity) {
-  const active = jobs.filter((job) => !["completed", "cancelled", "dead_letter", "failed"].includes(job.state));
+  const terminalStates = new Set(["completed", "cancelled", "dead_letter", "failed", "needs_attention"]);
+  const active = jobs.filter((job) => !terminalStates.has(job.state));
   const job = active[0] || jobs[0];
   $("#activeCount").textContent = `${active.length} active`;
   const latestSignal = activity[0];
@@ -542,7 +543,7 @@ async function load() {
     $("#mJobs").textContent = jobs.length;
     $("#mDone").textContent = metrics.completed ?? 0;
     setHTML("#jobs", jobs.length ? jobs.slice(0,12).map(jobRow).join("") : '<div class="empty-state compact"><strong>No delegated work yet</strong><small>Qualified signals will become traceable work here.</small></div>');
-    $("#jobSummary").textContent = `Live · ${jobs.filter((job) => job.state === "completed").length} completed · ${jobs.filter((job) => !["completed","cancelled","dead_letter","failed"].includes(job.state)).length} active`;
+    $("#jobSummary").textContent = `Live · ${jobs.filter((job) => job.state === "completed").length} completed · ${jobs.filter((job) => !["completed","cancelled","dead_letter","failed","needs_attention"].includes(job.state)).length} active`;
     renderCurrentJob(jobs, activity);
     renderDesktop(desktopDoctor, desktopActions);
     $("#memoryCount").textContent = `Live · ${memories.length} items`;

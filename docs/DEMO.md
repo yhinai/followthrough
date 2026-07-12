@@ -1,6 +1,6 @@
 # Four-minute demo
 
-The live demo should finish on the phone: show the durable job transition and Memo speaking the Hermes summary through the built-in loudspeaker. Current setup details are in [CURRENT_STATE.md](CURRENT_STATE.md).
+The live demo should finish in Discord and optionally on the phone: show the durable job transition, the typed DM receipt, and Memo speaking the same summary when `Discord + voice` is selected. Current setup details are in [CURRENT_STATE.md](CURRENT_STATE.md).
 
 ## Context — 20 seconds
 
@@ -8,13 +8,13 @@ The live demo should finish on the phone: show the durable job transition and Me
 
 ## Live demo — remaining 1 minute 40 seconds
 
-1. Open https://followthrough.alhinai.dev on the judge's phone.
-2. Turn on the visible consented session.
-3. Say: “I met Maya from Acme. She wants Hermes for support automation. Research Acme and prepare a Tuesday follow-up.”
-4. Show the Hermes manager creating a request-specific plan and delegating to entity resolution, research, opportunity, relationship, CRM, and QA roles.
-5. Open the completed report and the real Discord DM receipt.
-6. Show the edge case: “Lunch was great; the sandwich was perfect.” It is discarded before specialist work.
-7. If ElevenLabs is configured, play the spoken completion brief.
+1. Open `https://followthrough.alhinai.dev/#transcript` and show words arriving live from Memo.
+2. Say: “Followthrough, check the current RTX 5080 price on Best Buy and tell me when you're done.”
+3. Switch to Overview and show Heard → Relevant → Delegated → Browsing → Verified → Returned to phone.
+4. Show the live H Company session, current action, screenshot, and monotonic step count.
+5. Open the completed typed Discord DM receipt.
+6. In `Discord + voice`, let Memo speak the same verified result; in `Discord only`, show that the phone stays silent.
+7. Show the edge case: “Lunch was great; the sandwich was perfect.” It is archived without entering Hermes memory or creating work.
 
 ## Proof — 1 minute
 

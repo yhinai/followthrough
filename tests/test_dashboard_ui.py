@@ -77,3 +77,10 @@ def test_transcript_stream_recovers_from_lossy_sse_delivery():
     assert "event.resultIndex" in js
     # Brand link and hash edits keep the URL and visible view in sync.
     assert "hashchange" in js
+
+
+def test_needs_attention_is_not_rendered_as_active_work():
+    js = JS.read_text()
+
+    assert '"failed", "needs_attention"' in js
+    assert '"failed","needs_attention"' in js

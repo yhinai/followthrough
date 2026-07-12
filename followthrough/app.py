@@ -309,8 +309,10 @@ def create_app(config: Settings = settings) -> FastAPI:
             )
         else:
             response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-                "img-src 'self' data:; media-src 'self'; object-src 'none'; "
+                "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; "
+                "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+                "connect-src 'self' https://cloudflareinsights.com; img-src 'self' data:; "
+                "media-src 'self'; object-src 'none'; "
                 "base-uri 'none'; frame-ancestors 'none'"
             )
         if request.url.path.startswith("/api/"):

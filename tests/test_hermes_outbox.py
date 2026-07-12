@@ -160,6 +160,15 @@ def test_notification_failures_are_bounded(tmp_path) -> None:
         discord_user_id="123",
     )
     store.mark_hermes_enqueued("job-notify-cap", "task-notify-cap")
+    store.kanban_record_reconciled(
+        run_id,
+        task_id="task-notify-cap",
+        state="completed",
+        hermes_status="done",
+        latest_outcome="completed",
+        summary="Verified result",
+        diagnostics=[],
+    )
     for _ in range(5):
         assert len(store.kanban_pending_notifications(limit=1)) == 1
         store.kanban_record_notification_failure(run_id, error="discord_unavailable")

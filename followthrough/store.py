@@ -469,7 +469,12 @@ class Store:
     def kanban_pending_notifications(self, *, limit: int) -> list[dict[str, Any]]:
         with self.lock:
             rows = self.db.execute(
-                "SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND discord_chat_id IS NOT NULL AND notification_state NOT IN ('subscribed','failed') AND notification_attempts<5 AND state NOT IN ('completed','cancelled') ORDER BY updated_at LIMIT ?",
+                "SELECT h.*,COALESCE(NULLIF(c.latest_answer,''),NULLIF(r.summary,''),h.latest_outcome,'Completed') AS result_summary "
+                "FROM hermes_jobs h LEFT JOIN runs r ON r.id=h.run_id "
+                "LEFT JOIN computer_use_sessions c ON c.source_event_id=h.event_id "
+                "WHERE h.task_id IS NOT NULL AND h.discord_chat_id IS NOT NULL "
+                "AND h.notification_state NOT IN ('delivered','failed') AND h.notification_attempts<5 "
+                "AND h.state='completed' ORDER BY h.updated_at LIMIT ?",
                 (limit,),
             ).fetchall()
             if rows:
@@ -484,14 +489,16 @@ class Store:
                 "run_id": row["run_id"],
                 "task_id": row["task_id"],
                 "discord_chat_id": row["discord_chat_id"],
-                "discord_user_id": row["discord_user_id"],
+                "event_id": row["event_id"],
+                "entity": row["entity"],
+                "result_summary": row["result_summary"],
             }
             for row in rows
         ]
 
-    def kanban_record_notified(self, run_id: str, *, subscription: dict[str, str]) -> None:
+    def kanban_record_notified(self, run_id: str, *, receipt: dict[str, str]) -> None:
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET notification_state='subscribed',notification_json=?,last_error=NULL,updated_at=? WHERE run_id=?", (json.dumps(subscription, sort_keys=True), now(), run_id))
+            self.db.execute("UPDATE hermes_jobs SET notification_state='delivered',notification_json=?,last_error=NULL,updated_at=? WHERE run_id=?", (json.dumps(receipt, sort_keys=True), now(), run_id))
             self.db.commit()
 
     def kanban_record_notification_failure(self, run_id: str, *, error: str) -> None:

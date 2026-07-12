@@ -1,6 +1,6 @@
 # Followthrough
 
-Followthrough is an always-on personal ambient operator. Memo Android sensors capture continuously, the local archive keeps every transcript and audio chunk as plain files and SQLite rows, deterministic relevance promotes only useful speech, and a Hermes worker researches or proposes typed actions with durable receipts. The channel is bidirectional: Memo receives a durable job ID, resumes polling after an app restart, and speaks the Hermes result through the phone's built-in loudspeaker.
+Followthrough is an always-on personal ambient operator. Memo Android captures continuously, the local archive keeps every transcript and audio chunk as plain files and SQLite rows, deterministic relevance promotes only useful speech, and a Hermes worker researches or proposes typed actions with durable receipts. The channel is bidirectional: Memo streams interim words to the live transcript view, persists job IDs across restarts, and returns every completed result to the owner's Discord DM. Its `Discord + voice` mode also speaks the same verified result through the phone's built-in loudspeaker.
 
 This is a testing / proof-of-concept build: no authentication, no encryption, no backups — just the core flow.
 
@@ -12,7 +12,7 @@ uv pip install --python .venv/bin/python -e '.[dev]'
 .venv/bin/uvicorn followthrough.app:app --port 18765
 ```
 
-Open `http://localhost:18765/` for the live dashboard, or point the Memo Android app at the server. Ordinary chatter is archived and never enters Hermes memory or an action queue; only relevant signals become durable Hermes jobs. Reversible private actions run automatically, while external/high-risk writes stay policy-gated.
+Open `http://localhost:18765/` for the live dashboard or `http://localhost:18765/#transcript` for the word-streaming view. Ordinary chatter is archived and never enters Hermes memory or an action queue; only relevant signals become durable Hermes jobs. Reversible private actions run automatically, while external/high-risk writes stay policy-gated.
 
 The fast path is local and deterministic — archive, relevance, repository scanning/sandboxing, emergency controls, and typed receipts use no LLM call. Hermes runs only after a relevant signal crosses the gate.
 

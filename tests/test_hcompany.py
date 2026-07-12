@@ -22,6 +22,13 @@ def configured(tmp_path: Path, *, key: str = "") -> Settings:
     )
 
 
+def test_step_count_never_regresses_when_settled_snapshot_is_smaller() -> None:
+    from followthrough.hcompany import _step_count
+
+    assert _step_count({"step_count": 2}, 10) == 10
+    assert _step_count({"steps": ["one", "two"]}, 10) == 10
+
+
 @pytest.mark.asyncio
 async def test_missing_key_settles_as_configuration_required(tmp_path: Path) -> None:
     settings = configured(tmp_path)

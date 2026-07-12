@@ -30,9 +30,9 @@ def _step_count(payload: dict[str, Any], fallback: int) -> int:
         candidates.extend((status.get("step_count"), status.get("steps")))
     for value in candidates:
         if isinstance(value, int):
-            return value
+            return max(fallback, value)
         if isinstance(value, list):
-            return len(value)
+            return max(fallback, len(value))
     return fallback
 
 

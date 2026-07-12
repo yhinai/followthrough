@@ -9,6 +9,12 @@ def test_golden_price_check_is_actionable() -> None:
     assert result.kind == "web_task"
 
 
+def test_spoken_commodity_cost_question_is_actionable() -> None:
+    result = classify("What's the cost of gold today?")
+    assert result.actionable is True
+    assert result.kind == "web_task"
+
+
 def test_noise_is_discarded():
     result = classify('Lunch was great; the sandwich was perfect.')
     assert result.actionable is False

@@ -388,57 +388,6 @@ class HermesKanbanClient:
             payload=payload,
         )
 
-    def subscribe_discord(
-        self,
-        *,
-        task_id: str,
-        chat_id: str,
-        user_id: str | None = None,
-        notifier_profile: str = "default",
-    ) -> Mapping[str, Any]:
-        safe_task_id = _opaque_id(task_id, name="task_id")
-        safe_chat_id = _opaque_id(chat_id, name="chat_id")
-        safe_user_id = _opaque_id(user_id or chat_id, name="user_id")
-        safe_profile = _opaque_id(notifier_profile, name="notifier_profile")
-        self._run(
-            [
-                "kanban",
-                "--board",
-                BOARD,
-                "notify-subscribe",
-                safe_task_id,
-                "--platform",
-                "discord",
-                "--chat-id",
-                safe_chat_id,
-                "--user-id",
-                safe_user_id,
-                "--notifier-profile",
-                safe_profile,
-            ],
-            expect_json=False,
-        )
-        value = self._run(
-            [
-                "kanban",
-                "--board",
-                BOARD,
-                "notify-list",
-                safe_task_id,
-                "--json",
-            ],
-            expect_json=True,
-        )
-        subscriptions = _records(value, "subscriptions", "notifications", "items", "data")
-        for subscription in subscriptions:
-            if (
-                str(subscription.get("platform", "")).lower() == "discord"
-                and str(subscription.get("chat_id")) == safe_chat_id
-                and str(subscription.get("user_id")) == safe_user_id
-            ):
-                return subscription
-        raise KanbanCommandError("Discord subscription was not observable")
-
     def show_task(self, task_id: str) -> dict[str, Any]:
         safe_task_id = _opaque_id(task_id, name="task_id")
         value = self._run(
@@ -642,12 +591,12 @@ class KanbanStore(Protocol):
     def kanban_pending_notifications(
         self, *, limit: int
     ) -> Sequence[Mapping[str, object]]:
-        """Return run_id, task_id, discord_chat_id, and optional discord_user_id."""
+        """Return completed results waiting for durable Discord delivery."""
 
         ...
 
     def kanban_record_notified(
-        self, run_id: str, *, subscription: Mapping[str, str]
+        self, run_id: str, *, receipt: Mapping[str, str]
     ) -> None: ...
 
     def kanban_record_notification_failure(self, run_id: str, *, error: str) -> None: ...
@@ -670,15 +619,6 @@ class KanbanStore(Protocol):
     ) -> None: ...
 
     def kanban_record_reconcile_failure(self, run_id: str, *, error: str) -> None: ...
-
-
-def _sanitized_subscription(subscription: Mapping[str, Any]) -> dict[str, str]:
-    allowed = ("platform", "chat_id", "user_id", "notifier_profile")
-    return {
-        key: _safe_token(subscription[key])
-        for key in allowed
-        if subscription.get(key) is not None
-    }
 
 
 class DurableOrchestrator:
@@ -834,54 +774,6 @@ class DurableOrchestrator:
                     code = "store_failure"
                 errors.append({"phase": "create", "run_id": run_reference, "error": code})
 
-        notification_rows: Sequence[Mapping[str, object]] = ()
-        if self.control_plane is None:
-            notification_rows = self.store.kanban_pending_notifications(
-                limit=max(0, notification_limit)
-            )
-        else:
-            from .controls import Capability
-
-            if self.control_plane.operation_allowed(Capability.MESSAGES):
-                notification_rows = self.store.kanban_pending_notifications(
-                    limit=max(0, notification_limit)
-                )
-        for row in notification_rows:
-            run_reference = self._run_reference(row)
-            try:
-                if self.control_plane is not None:
-                    from .controls import Capability
-
-                    message = self.control_plane.authorize(
-                        Capability.MESSAGES,
-                        idempotency_key=f"kanban-notify:{run_reference}",
-                        actor="orchestrator",
-                    )
-                    if not message.allowed:
-                        continue
-                run_id = _opaque_id(row.get("run_id"), name="run_id")
-                task_id = _opaque_id(row.get("task_id"), name="task_id")
-                chat_id = _opaque_id(row.get("discord_chat_id"), name="discord_chat_id")
-                raw_user_id = row.get("discord_user_id")
-                user_id = None if raw_user_id in (None, "") else str(raw_user_id)
-                subscription = self.client.subscribe_discord(
-                    task_id=task_id,
-                    chat_id=chat_id,
-                    user_id=user_id,
-                )
-                self.store.kanban_record_notified(
-                    run_id,
-                    subscription=_sanitized_subscription(subscription),
-                )
-                result["notified"] = int(result["notified"]) + 1
-            except Exception as error:
-                code = self._error_code(error)
-                try:
-                    self.store.kanban_record_notification_failure(run_reference, error=code)
-                except Exception:
-                    code = "store_failure"
-                errors.append({"phase": "notify", "run_id": run_reference, "error": code})
-
         for row in self.store.kanban_active(limit=max(0, reconcile_limit)):
             run_reference = self._run_reference(row)
             try:
@@ -922,7 +814,64 @@ class DurableOrchestrator:
                     {"phase": "reconcile", "run_id": run_reference, "error": code}
                 )
 
+        notification_rows: Sequence[Mapping[str, object]] = ()
+        if self.effect_service is not None and (
+            self.control_plane is None
+            or self.control_plane.operation_allowed(Capability.MESSAGES)
+        ):
+            notification_rows = self.store.kanban_pending_notifications(
+                limit=max(0, notification_limit)
+            )
+        for row in notification_rows:
+            run_reference = self._run_reference(row)
+            try:
+                if self.control_plane is not None:
+                    message = self.control_plane.authorize(
+                        Capability.MESSAGES,
+                        idempotency_key=f"kanban-result:{run_reference}",
+                        actor="orchestrator",
+                    )
+                    if not message.allowed:
+                        continue
+                receipt = self._dispatch_result_notification(row)
+                self.store.kanban_record_notified(run_reference, receipt=receipt)
+                result["notified"] = int(result["notified"]) + 1
+            except Exception as error:
+                code = self._error_code(error)
+                try:
+                    self.store.kanban_record_notification_failure(run_reference, error=code)
+                except Exception:
+                    code = "store_failure"
+                errors.append({"phase": "notify", "run_id": run_reference, "error": code})
+
         return result
+
+    def _dispatch_result_notification(self, row: Mapping[str, object]) -> dict[str, str]:
+        if self.effect_service is None:
+            raise RuntimeError("Discord result effector is unavailable")
+        from .effectors.models import DiscordMessageRequest, EffectKind, EffectState
+
+        event_id = _opaque_id(row.get("event_id"), name="event_id")
+        task_id = _opaque_id(row.get("task_id"), name="task_id")
+        chat_id = _opaque_id(row.get("discord_chat_id"), name="discord_chat_id")
+        entity = str(row.get("entity") or "Completed Followthrough task")[:300]
+        summary = str(row.get("result_summary") or "Completed successfully.")[:1_350]
+        request = DiscordMessageRequest(
+            kind=EffectKind.DISCORD_MESSAGE_SEND,
+            trigger_event_id=event_id,
+            target=f"discord:{chat_id}",
+            subject="Followthrough · completed",
+            body=f"**{entity}**\n\n{summary}\n\nHermes receipt: `{task_id}`",
+            owner_only=True,
+        )
+        record = self.effect_service.submit(
+            request,
+            idempotency_key=f"followthrough:{event_id}:result:discord:v1",
+            execute=True,
+        )
+        if record.get("state") != EffectState.COMPLETED.value:
+            raise RuntimeError("Discord result delivery did not complete")
+        return {"effect_id": str(record.get("id", "unknown")), "state": "delivered"}
 
     def _dispatch_effect(
         self,

@@ -288,3 +288,10 @@ def test_spoken_web_command_is_classified_as_web_task():
     )
     assert price.primary_category == Category.WEB_TASK
     assert price.dispatch_allowed is True
+
+    commodity = evaluate_relevance(
+        "What's the cost of gold today?",
+        SpeakerContext.native_owner("owner-device"),
+    )
+    assert commodity.primary_category == Category.WEB_TASK
+    assert commodity.dispatch_allowed is True

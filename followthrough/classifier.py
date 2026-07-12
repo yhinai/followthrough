@@ -17,7 +17,7 @@ URL_RE = re.compile(r"https?://\S+", re.I)
 
 ACTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("repository", REPO_RE),
-    ("web_task", re.compile(r"\b(?:check|find|compare|look up|search for)\b.{0,80}\b(?:price|cost|availability|stock)\b|\b(?:price|cost)\b.{0,50}\b(?:on|at|from)\b", re.I)),
+    ("web_task", re.compile(r"\b(?:check|find|compare|look up|search for)\b.{0,80}\b(?:price|cost|availability|stock)\b|\b(?:what(?:'s| is)|how much is)\b.{0,50}\b(?:price|cost)\b|\b(?:price|cost)\b.{0,50}\b(?:on|at|from|today|now|currently)\b", re.I)),
     ("follow_up", re.compile(r"\b(follow[ -]?up|reach out|send (?:her|him|them)|email|dm)\b", re.I)),
     ("meeting", re.compile(r"\b(meet|meeting|calendar|schedule|tuesday|wednesday|thursday)\b", re.I)),
     ("company", re.compile(r"\b(startup|company|founder|customer|prospect|lead|buyer|partner)\b", re.I)),

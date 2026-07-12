@@ -3,9 +3,9 @@
 Stopping Memo's foreground service is the device-local microphone kill path. The two-way job endpoint is read-only and exposes sanitized results only.
 
 Followthrough's emergency boundary is stored in `data/followthrough.db`. It is
-not a Hermes prompt and a worker cannot clear it. Every change requires the
-dashboard bearer token, produces a hash-chained audit receipt, and survives
-process or host restarts.
+not a Hermes prompt and a worker cannot clear it. Every change produces a
+hash-chained audit receipt and survives process or host restarts. This lean
+test deployment has authentication disabled.
 
 ## Semantics
 
@@ -20,7 +20,7 @@ The independent capabilities are `listening`, `actions`, `messages`,
 `self_improvement`, and `rollback`. Disabling actions or sessions parks every
 active job.
 Disabling repository execution parks repository jobs. Disabling messages stops
-new Discord subscriptions without stopping archive intake.
+typed Discord result delivery without stopping archive intake.
 
 Parking is two-phase. The API first commits `park_requested` and an owner-only
 task command to SQLite. The orchestrator then runs the exact Hermes equivalent

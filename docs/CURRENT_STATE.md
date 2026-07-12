@@ -7,14 +7,15 @@ tokenless test deployment currently running on Spark.
 
 ```text
 Memo Android microphone
-  -> audio and finalized transcripts
+  -> audio plus interim and finalized transcripts
   -> https://followthrough.alhinai.dev
   -> complete local archive on Spark
   -> deterministic relevance and aggregation
   -> relevant-only durable Hermes Kanban job
   -> research / sandbox test / typed effect
-  -> sanitized job status
-  -> Memo polling and spoken phone-speaker result
+  -> typed Discord result delivery
+  -> sanitized job status and Memo polling
+  -> optional phone-speaker result
 ```
 
 Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary conversation is preserved only in the complete archive and is excluded from operational memory and actions. Transcripts are stored directly in SQLite and audio is stored as local files.
@@ -23,7 +24,7 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 
 - Public health endpoint, Followthrough, orchestrator, and Cloudflare tunnel are active.
 - Public health reports `auth_required: false`; there are no Followthrough token files, token middleware, or dashboard token prompts.
-- Followthrough Python suite: 167 passed after the H session and local Spark desktop additions.
+- Followthrough Python suite: 194 passed after transcript streaming, Discord delivery, and H-session fixes.
 - Memo Android build: successful on OpenJDK 17.
 - Samsung `SM-F776U1`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified.
 
@@ -34,7 +35,7 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 - The test deployment is intentionally tokenless. Memo needs only the HTTPS endpoint.
 - Memo persists pending IDs in Android preferences and resumes polling after restart.
 - Terminal states are `completed`, `dead_letter`, `needs_attention`, and `cancelled`.
-- Hermes run summaries are persisted to the Followthrough run and returned to Memo; Gemini Live speaks the result.
+- Hermes/H results are persisted, delivered idempotently to Discord, and returned to Memo. Memo speaks them only in `Discord + voice` mode.
 
 ## Tools and services
 
@@ -49,7 +50,7 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 | Relevance | Deterministic owner/category/entity gate and transcript aggregation |
 | Agent runtime | Hermes Kanban board and least-authority `followthrough` worker profile |
 | Repository evaluation | Pinned provenance, policy scan, systemd+bubblewrap sandbox runner, deterministic receipts |
-| Owner surfaces | Memo spoken result, live web dashboard, optional Hermes Discord DM |
+| Owner surfaces | Durable Hermes Discord DM, optional Memo spoken result, live dashboard and `#transcript` word stream |
 | Verification | Pytest/Ruff, Android Gradle build, public health checks, and optional bounded monitoring |
 
 ## Typed workflow verification
@@ -60,8 +61,8 @@ Verified live on 2026-07-12 PDT:
   `followthrough-private-tasks` and was rolled back to cancelled.
 - Calendar effect `c7f16e5e-1a5f-4dd5-b195-802b16dfa9cb` created a real
   primary-calendar event with attendee notifications disabled and then deleted it.
-- Discord transport delivered verification message
-  `1525784068417917028` to the configured owner channel.
+- The current typed Discord result path delivered messages `86857` and `86858`
+  to the configured owner DM, with H answers and Hermes receipts.
 - Sandbox purchase effect `3285dd4f-969c-453d-9eae-fdf96f3e4c31`
   authorized one cent in test mode and was then voided. No real payment moved.
 - Deployment effect `fdb8b9de-16f6-400d-b7a7-2f5dd967dad4` reached the
@@ -82,9 +83,9 @@ completed job `25a6bfb0-c066-4398-a17b-62ed90ddd9b0` and Kanban task
 ## Remaining acceptance work
 
 The product is operational. The physical Samsung has verified continuous audio,
-finalized transcript ingestion, completed Hermes research, restart-safe result
-recovery, and built-in-speaker routing. A fresh spoken actionable phrase remains
-the recommended final demo rehearsal; it is not a soak requirement.
+live word streaming, finalized transcript ingestion, H Company browsing,
+completed Hermes work, typed Discord delivery, restart-safe result recovery,
+built-in-speaker routing, and automatic listening restoration after reboot.
 
 The free Spark desktop plane is active and restart-enabled. Public doctor and
 screenshot checks pass, the noVNC WebSocket negotiates RFB 3.8 through

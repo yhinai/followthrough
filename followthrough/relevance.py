@@ -334,7 +334,8 @@ _RULES: tuple[_Rule, ...] = (
         _rx(
             r"\b(?:book|reserve|order|purchase|add\s+to\s+cart|"
             r"buy\s+(?:me\s+)?(?:a|an|the|some)\b|"
-            r"check\b.{0,48}\bprice|price\s+(?:of|for|watch|check)|"
+            r"check\b.{0,48}\b(?:price|cost)|(?:price|cost)\s+(?:of|for|watch|check)|"
+            r"(?:what(?:'s| is)|how\s+much\s+is)\b.{0,48}\b(?:price|cost)|"
             r"fill\s+(?:out|in)|sign\s+(?:me\s+)?up\s+for|apply\s+(?:to|for)|"
             r"find\s+(?:me\s+)?(?:a|an|the|the\s+cheapest|cheap)\b|"
             r"search\s+(?:the\s+web|online)\s+for)\b"
