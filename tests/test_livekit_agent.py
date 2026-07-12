@@ -26,6 +26,7 @@ def test_memo_token_is_room_scoped_audio_only_and_dispatches_agent() -> None:
         device_id="memo-samsung-phone",
         surface="memo-android",
         response_mode="discord_and_voice",
+        speaker_mode="personal",
         ttl_seconds=600,
     )
     claims = jwt.decode(
@@ -42,7 +43,9 @@ def test_memo_token_is_room_scoped_audio_only_and_dispatches_agent() -> None:
     assert claims["video"]["canPublishSources"] == ["microphone"]
     assert claims["video"]["canPublishData"] is False
     assert claims["roomConfig"]["agents"][0]["agentName"] == "followthrough"
-    assert json.loads(claims["metadata"])["capture_consent"] is True
+    metadata = json.loads(claims["metadata"])
+    assert metadata["capture_consent"] is True
+    assert metadata["speaker_mode"] == "personal"
 
 
 def test_reconnect_gets_a_fresh_room_and_identity() -> None:
@@ -54,6 +57,7 @@ def test_reconnect_gets_a_fresh_room_and_identity() -> None:
         "device_id": "memo-samsung-phone",
         "surface": "memo-android",
         "response_mode": "discord_only",
+        "speaker_mode": "meeting",
         "ttl_seconds": 600,
     }
     first = issue_memo_session_token(**options)
@@ -100,7 +104,8 @@ async def test_adjacent_stt_finals_are_coalesced_into_one_utterance(
     delivered: list[dict[str, object]] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        delivered.append(json.loads(request.content))
+        if request.url.path == "/api/v1/transcripts":
+            delivered.append(json.loads(request.content))
         return httpx.Response(202, json={"status": "queued"})
 
     monkeypatch.setattr("followthrough.livekit_agent.FINAL_COALESCE_SECONDS", 0.03)
@@ -170,11 +175,127 @@ async def test_failed_final_is_not_marked_finalized(
     await bridge.client.aclose()
     bridge.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
-    bridge.pending_finals.append(("Memo, research this tool", "item-retry"))
+    bridge.pending_finals.append(("Memo, research this tool", "item-retry", None))
     with pytest.raises(httpx.HTTPStatusError):
         await bridge._flush_finals()
 
     assert bridge.finalized == set()
+    await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_adjacent_finals_from_different_speakers_are_never_merged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delivered: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/transcripts":
+            delivered.append(json.loads(request.content))
+        return httpx.Response(202, json={"status": "archived"})
+
+    monkeypatch.setattr("followthrough.livekit_agent.FINAL_COALESCE_SECONDS", 0.02)
+    participant = SimpleNamespace(
+        metadata=json.dumps(
+            {"device_id": "memo-meeting-phone", "speaker_mode": "meeting"}
+        )
+    )
+    ctx = SimpleNamespace(
+        room=SimpleNamespace(
+            name="followthrough-meeting", remote_participants={"phone": participant}
+        )
+    )
+    bridge = TranscriptBridge(ctx=ctx, session=SimpleNamespace())
+    await bridge.client.aclose()
+    bridge.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    await bridge._queue_final("Memo, search gold prices", "owner-item", "speaker-0")
+    await bridge._queue_final("That sounds useful", "guest-item", "speaker-1")
+    await asyncio.sleep(0.04)
+
+    assert [item["text"] for item in delivered] == [
+        "Memo, search gold prices",
+        "That sounds useful",
+    ]
+    assert [item["metadata"]["speaker_id"] for item in delivered] == [
+        "speaker-0",
+        "speaker-1",
+    ]
+    assert all(item["metadata"]["speaker_mode"] == "meeting" for item in delivered)
+    assert all(item["metadata"]["allow_owner_report"] is False for item in delivered)
+    await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_final_item_is_delivered_only_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delivered: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/transcripts":
+            delivered.append(json.loads(request.content))
+        return httpx.Response(202, json={"status": "archived"})
+
+    monkeypatch.setattr("followthrough.livekit_agent.FINAL_COALESCE_SECONDS", 0.01)
+    ctx = SimpleNamespace(room=SimpleNamespace(name="followthrough-room", remote_participants={}))
+    bridge = TranscriptBridge(ctx=ctx, session=SimpleNamespace())
+    await bridge.client.aclose()
+    bridge.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    await bridge._queue_final("Memo, research this", "same-item", "speaker-0")
+    await bridge._queue_final("Memo, research this", "same-item", "speaker-0")
+    await asyncio.sleep(0.02)
+
+    assert len(delivered) == 1
+    await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_phone_delivery_is_spoken_then_acknowledged() -> None:
+    calls: list[tuple[str, str]] = []
+    spoken: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "receipt_id": "receipt-one",
+                        "state": "completed",
+                        "summary": "Gold is 2,400 dollars.",
+                    }
+                ],
+            )
+        return httpx.Response(200, json={"state": "acknowledged"})
+
+    async def say(text: str) -> None:
+        spoken.append(text)
+
+    participant = SimpleNamespace(
+        metadata=json.dumps(
+            {
+                "device_id": "memo-delivery-phone",
+                "response_mode": "discord_and_voice",
+            }
+        )
+    )
+    ctx = SimpleNamespace(
+        room=SimpleNamespace(name="followthrough-room", remote_participants={"p": participant})
+    )
+    bridge = TranscriptBridge(ctx=ctx, session=SimpleNamespace(say=say))
+    await bridge.client.aclose()
+    bridge.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    await bridge._drain_phone_deliveries()
+
+    assert spoken == ["Followthrough result. Gold is 2,400 dollars."]
+    assert calls == [
+        ("GET", "/api/v1/devices/memo-delivery-phone/deliveries"),
+        ("POST", "/api/v1/devices/memo-delivery-phone/deliveries/ack"),
+    ]
     await bridge.close()
 
 

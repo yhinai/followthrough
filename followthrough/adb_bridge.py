@@ -51,7 +51,7 @@ RESEARCH_QUERY = re.compile(
 )
 CHECK_QUERY = re.compile(r"\bcheck\s+it\s+out\s+(?:for\s+|and\s+)?\S+", re.I)
 INCOMPLETE_COMMAND = re.compile(
-    r"^(?:(?:a\s+)?(?:follow\s*through|memo)\s*[,;:\-]?\s*)?"
+    r"(?:^|[.!?]\s*)(?:(?:a\s+)?(?:follow\s*through|memo)\s*[,;:\-]?\s*)?"
     r"(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
     r"(?:research(?:\s+(?:the|a|an|this|that|my|our))?|"
     r"perform\s+(?:a\s+)?web\s+search|search\s+(?:(?:the\s+)?(?:web|internet)|online)|"
@@ -95,6 +95,8 @@ class TranscriptAggregator:
         candidates = [item for _, item in self._segments if item.text.strip()]
         text = " ".join(item.text.strip() for item in candidates)
         self.waiting_for_context = bool(INCOMPLETE_COMMAND.search(text))
+        if self.waiting_for_context:
+            return None
         query_complete = SEARCH_QUERY.search(text) or RESEARCH_QUERY.search(text) or CHECK_QUERY.search(
             text
         )

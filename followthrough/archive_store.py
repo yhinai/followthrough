@@ -217,3 +217,63 @@ class ArchiveStore:
 
     def integrity_check(self) -> bool:
         return self.db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+    def export_device(self, device_id: str) -> dict[str, Any]:
+        """Return a portable, honest export of everything retained for a device."""
+
+        events = self.db.execute(
+            "SELECT * FROM archive_events WHERE device_id=? ORDER BY occurred_at,id",
+            (device_id,),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for event in events:
+            item = dict(event)
+            item["transcript"] = bytes(item.pop("transcript_bytes")).decode(
+                "utf-8", errors="replace"
+            )
+            item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+            item["audio"] = [
+                dict(row)
+                for row in self.db.execute(
+                    "SELECT sequence,path,mime_type,plaintext_sha256,plaintext_bytes,created_at "
+                    "FROM audio_chunks WHERE archive_id=? ORDER BY sequence",
+                    (event["id"],),
+                ).fetchall()
+            ]
+            result.append(item)
+        return {"device_id": device_id, "exported_at": now(), "events": result}
+
+    def delete_device(self, device_id: str) -> dict[str, Any]:
+        """Delete database records and return audio paths for filesystem cleanup."""
+
+        with self.lock:
+            events = self.db.execute(
+                "SELECT id,run_id FROM archive_events WHERE device_id=?", (device_id,)
+            ).fetchall()
+            archive_ids = [row["id"] for row in events]
+            run_ids = [row["run_id"] for row in events if row["run_id"]]
+            paths: list[str] = []
+            if archive_ids:
+                placeholders = ",".join("?" for _ in archive_ids)
+                paths = [
+                    row[0]
+                    for row in self.db.execute(
+                        f"SELECT path FROM audio_chunks WHERE archive_id IN ({placeholders})",
+                        archive_ids,
+                    ).fetchall()
+                ]
+                self.db.execute(
+                    f"DELETE FROM audio_chunks WHERE archive_id IN ({placeholders})", archive_ids
+                )
+                self.db.execute(
+                    f"DELETE FROM archive_events WHERE id IN ({placeholders})", archive_ids
+                )
+            self.db.execute("DELETE FROM capture_streams WHERE device_id=?", (device_id,))
+            self.db.commit()
+        return {
+            "device_id": device_id,
+            "events_deleted": len(archive_ids),
+            "archive_ids": archive_ids,
+            "run_ids": run_ids,
+            "audio_paths": paths,
+        }

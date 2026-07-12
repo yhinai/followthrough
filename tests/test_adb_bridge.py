@@ -68,6 +68,18 @@ def test_bare_search_the_web_waits_instead_of_launching_without_a_query() -> Non
     assert aggregator.waiting_for_context is True
 
 
+def test_trailing_incomplete_command_does_not_absorb_prior_ambient_context() -> None:
+    aggregator = TranscriptAggregator(window_seconds=45)
+    assert (
+        aggregator.add(
+            segment(1, "We discussed an API at the hackathon. Followthrough research"),
+            monotonic_at=1,
+        )
+        is None
+    )
+    assert aggregator.waiting_for_context is True
+
+
 def test_does_not_aggregate_ordinary_or_passive_tool_conversation() -> None:
     aggregator = TranscriptAggregator(window_seconds=45)
     assert aggregator.add(segment(1, "The pizza was good"), monotonic_at=1) is None

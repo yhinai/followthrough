@@ -26,6 +26,7 @@ def issue_memo_session_token(
     device_id: str,
     surface: str,
     response_mode: str,
+    speaker_mode: str,
     ttl_seconds: int,
 ) -> LiveKitSessionToken:
     if not server_url or not api_key or not api_secret:
@@ -45,6 +46,7 @@ def issue_memo_session_token(
             "surface": surface,
             "device_id": device_id,
             "response_mode": response_mode,
+            "speaker_mode": speaker_mode,
             "capture_consent": True,
         },
         separators=(",", ":"),

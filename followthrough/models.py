@@ -15,7 +15,7 @@ class SignupIn(BaseModel):
 
 
 class SignalIn(BaseModel):
-    text: str = Field(min_length=1, max_length=8000)
+    text: str = Field(min_length=1, max_length=12_000)
     source: Literal["web", "voice", "omi", "api", "demo"] = "web"
     email: EmailStr | None = None
     consent: bool = False
@@ -83,7 +83,9 @@ class TranscriptEventIn(BaseModel):
     text: str = Field(min_length=1, max_length=65_536)
     source: Literal["omi", "phone", "wearable", "web", "voice", "api", "demo"] = "omi"
     occurred_at: datetime | None = None
-    consent: bool = True
+    # Omission must fail closed. The capture surface asserts the consent it
+    # actually collected for this session or signal.
+    consent: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -101,16 +103,29 @@ class TranscriptPartialIn(BaseModel):
     source: Literal["omi", "phone", "wearable", "web", "voice", "api", "demo"] = "phone"
     seq: int = Field(default=0, ge=0)
     occurred_at: datetime | None = None
-    consent: bool = True
+    consent: bool = False
 
 
 class LiveKitSessionIn(BaseModel):
-    device_id: str = Field(
-        min_length=3, pattern=r"^[a-z0-9-]{3,100}$", max_length=100
-    )
+    device_id: str = Field(min_length=3, pattern=r"^[a-z0-9-]{3,100}$", max_length=100)
     surface: Literal["memo-android", "dashboard"] = "memo-android"
     consent: bool = False
     response_mode: Literal["discord_and_voice", "discord_only"] = "discord_and_voice"
+    speaker_mode: Literal["personal", "meeting"] = "personal"
+
+
+class DeviceHeartbeatIn(BaseModel):
+    device_id: str = Field(min_length=3, pattern=r"^[a-z0-9-]{3,100}$", max_length=100)
+    room_name: str = Field(min_length=8, max_length=200)
+    surface: Literal["memo-android", "dashboard"]
+    response_mode: Literal["discord_and_voice", "discord_only"]
+    state: Literal["listening", "offline"]
+    microphone_published: bool
+    last_transcript_activity_at: datetime | None = None
+
+
+class PhoneDeliveryAckIn(BaseModel):
+    receipt_id: str = Field(min_length=8, max_length=100)
 
 
 class AudioChunkReceipt(BaseModel):

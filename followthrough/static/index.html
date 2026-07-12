@@ -3,17 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f4f5ef">
-  <title>Followthrough · Ambient operator</title>
+  <meta name="theme-color" content="#f7f7f5">
+  <meta name="description" content="A consent-first ambient business development operator powered by Hermes.">
+  <title>Followthrough — Continue the conversations that matter</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23f4f5ef'/%3E%3Cpath d='M18 23h28M18 34h18' stroke='%234f8f24' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-16">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-17">
 </head>
 <body>
+  <a class="skip-link" href="#top">Skip to content</a>
   <div class="grain" aria-hidden="true"></div>
   <header class="topbar">
     <a class="brand" href="#top" aria-label="Followthrough home">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
-      <span><strong>Followthrough</strong><small>Memo ambient companion</small></span>
+      <span><strong>Followthrough</strong><small>Consent-first ambient agency</small></span>
     </a>
     <nav class="view-tabs" role="tablist" aria-label="Dashboard views">
       <button id="tabOverview" class="view-tab active" type="button" role="tab" aria-selected="true" aria-controls="top">Overview</button>
@@ -40,7 +42,7 @@
       <div class="overview-note"><span class="shield">◇</span><div><strong>Action boundary active</strong><small>Ordinary conversation stays archive-only and never enters operational memory.</small></div></div>
     </section>
 
-    <section class="journey-strip" aria-label="Live ambient journey"><div class="heard"><small>Ambient trigger</small><strong id="journeyHeard">Listening for the demo phrase…</strong><span id="journeyDecision">Mention it, put your phone away, and Followthrough handles it.</span></div><ol id="journeyStages"><li>Heard</li><li>Relevant</li><li>Delegated</li><li>Browsing</li><li>Verified</li><li>Discord</li><li>Phone</li></ol><div class="journey-proof"><strong id="journeyElapsed">—</strong><small id="journeyPhone">Runs quietly in the background</small></div></section>
+    <section class="journey-strip" aria-label="Live ambient journey" aria-live="polite"><div class="heard"><small>Latest moment</small><strong id="journeyHeard">Listening for something worth doing…</strong><span id="journeyDecision">Mention it, put your phone away, and Followthrough handles it.</span></div><ol id="journeyStages" aria-label="Progress"><li>Heard</li><li>Relevant</li><li>Delegated</li><li>Browsing</li><li>Verified</li><li>Discord</li><li>Phone</li></ol><div class="journey-proof"><strong id="journeyElapsed">Ready</strong><small id="journeyPhone">Runs quietly in the background</small></div></section>
 
     <section class="panel agent-panel" aria-labelledby="agentTitle">
       <div class="panel-head">
@@ -68,11 +70,11 @@
       <aside class="agent-history"><small>Recent runs</small><ol id="agentSessions" class="agent-sessions" aria-label="Recent agent sessions"></ol><p>Runs asynchronously. Continue your day; the result returns to your phone.</p></aside></div>
     </section>
 
-    <section class="panel desktop-panel" aria-labelledby="desktopTitle">
-      <div class="panel-head">
+    <details class="panel desktop-panel disclosure-panel">
+      <summary class="panel-head">
         <div><p class="kicker">Computer use · Spark local control plane</p><h2 id="desktopTitle">Live agent desktop</h2></div>
-        <span id="desktopState" class="desktop-state offline"><i></i>Not configured</span>
-      </div>
+        <span id="desktopState" class="desktop-state offline"><i></i>Not configured</span><span class="disclosure-action">Show desktop</span>
+      </summary>
       <div class="desktop-grid">
         <div class="desktop-viewer">
           <div class="desktop-chrome"><span><i></i><i></i><i></i></span><b id="desktopRoute">Automatic routing</b><small id="desktopResolution">—</small></div>
@@ -89,7 +91,7 @@
           <div class="desktop-buttons"><button id="desktopControl" class="primary" type="button" aria-pressed="false">Take control</button><button id="refreshDesktop" class="secondary" type="button">Refresh desktop</button></div>
         </div>
       </div>
-    </section>
+    </details>
 
     <section class="workspace">
       <article class="panel focus-panel">
@@ -107,21 +109,21 @@
       </article>
     </section>
 
-    <section class="panel workbench">
-      <div class="panel-head"><div><p class="kicker">Outcome ledger</p><h2>Work, with receipts</h2></div><span id="jobSummary">No work yet</span></div>
+    <details class="panel workbench disclosure-panel">
+      <summary class="panel-head"><div><p class="kicker">Outcome ledger</p><h2>Work, with receipts</h2></div><span id="jobSummary">No work yet</span><span class="disclosure-action">Show receipts</span></summary>
       <div class="job-columns"><span>Opportunity</span><span>State</span><span>Receipt</span><span>Updated</span></div>
       <div id="jobs" class="job-table"><div class="empty-state compact"><strong>No delegated work yet</strong><small>Qualified signals will become traceable work here.</small></div></div>
-    </section>
+    </details>
 
-    <section class="panel memory-panel">
-      <div class="panel-head"><div><p class="kicker">Curated context</p><h2>What Followthrough remembers</h2></div><span id="memoryCount">0 items</span></div>
+    <details class="panel memory-panel disclosure-panel">
+      <summary class="panel-head"><div><p class="kicker">Curated context</p><h2>What Followthrough remembers</h2></div><span id="memoryCount">0 items</span><span class="disclosure-action">Show memory</span></summary>
       <p class="memory-intro">Only context promoted for future work—not a transcript of your life.</p>
       <div id="memories" class="memory-list"><div class="empty-state compact"><strong>No memory promoted</strong><small>Important entities and preferences will appear here.</small></div></div>
-    </section>
+    </details>
 
     <details class="demo-drawer panel">
       <summary><span class="console-icon">⌁</span><span><b>Try a signal</b><small>Send a controlled prompt through the same live system</small></span><span class="summary-action">Open console <i>↗</i></span></summary>
-      <div class="demo-body"><label for="input">What should Followthrough notice?</label><textarea id="input" placeholder="Research and safely evaluate a company I just met…"></textarea><div class="capture-actions"><button id="submit" class="primary" type="button">Run through Hermes <span>→</span></button><button id="sample" class="secondary" type="button">Load example</button><button id="listen" class="secondary livekit-mic" type="button" aria-pressed="false"><span class="mic-dot"></span><span id="micLabel">Web mic</span></button><small id="micStatus" class="mic-status" role="status" aria-live="polite">LiveKit · ready</small><small class="shortcut">⌘ Enter to send · / to focus</small></div><div id="remoteAudio" hidden></div></div>
+      <div class="demo-body"><label for="input">What should Followthrough notice?</label><textarea id="input" maxlength="12000" placeholder="Research and safely evaluate a company I just met…" aria-describedby="consentHelp"></textarea><label class="consent-control" for="consent"><input id="consent" type="checkbox"><span><strong>I consent to process this signal</strong><small id="consentHelp">The finalized transcript stays in your local archive. Only relevant signals enter Hermes or create work.</small></span></label><div class="capture-actions"><button id="submit" class="primary" type="button" disabled>Run through Hermes <span>→</span></button><button id="sample" class="secondary" type="button">Load example</button><button id="listen" class="secondary livekit-mic" type="button" aria-pressed="false" disabled><span class="mic-dot"></span><span id="micLabel">Web mic</span></button><small id="micStatus" class="mic-status" role="status" aria-live="polite">Consent required</small><small class="shortcut">⌘ Enter to send · / to focus</small></div><div id="remoteAudio" hidden></div></div>
     </details>
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   </main>
@@ -143,7 +145,7 @@
 
   <main id="workspaceView" class="workspace-view" role="tabpanel" aria-labelledby="tabWorkspace" hidden>
     <section class="workspace-summary" aria-label="Workspace item count">
-      <strong id="workspaceTotal">0</strong><span>important items</span><small>Live from Hermes</small>
+      <strong id="workspaceTotal">0</strong><span>important items</span><small>Editable · live from Hermes</small>
     </section>
     <section class="workspace-board" aria-label="Important work grouped by type">
       <article data-group="research"><header><span class="workspace-icon">⌕</span><div><h2>Research</h2><p>Questions, tools, companies, and verified findings</p></div><b id="countResearch">0</b></header><div id="workspaceResearch" class="workspace-stack"></div></article>
@@ -155,6 +157,6 @@
 
   <footer><span>Followthrough + Memo</span><span>Hermes · H Company · NVIDIA Spark</span><span>Built for conversations worth continuing.</span></footer>
   <script src="/static/vendor/livekit-client.umd.js"></script>
-  <script src="/static/app.js?v=20260712-16"></script>
+  <script src="/static/app.js?v=20260712-17"></script>
 </body>
 </html>

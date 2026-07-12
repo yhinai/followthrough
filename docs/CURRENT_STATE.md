@@ -25,7 +25,8 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. For the L
 
 - Public health endpoint, Followthrough, orchestrator, and Cloudflare tunnel are active.
 - Public health reports `auth_required: false`; there are no Followthrough token files, token middleware, or dashboard token prompts.
-- Followthrough Python suite: 279 tests passed after the LiveKit integration.
+- Followthrough Python suite: 309 tests passed after the consent, information-routing,
+  transcript-aggregation, and dashboard quality pass.
 - Memo Android clean unit-test and debug-APK build: successful on OpenJDK 17.
 - Samsung `SM-F776U1`: foreground microphone publishing, LiveKit room dispatch, Spark worker join, and built-in speaker routing verified.
 - Ambient relevance eval: 40/40 realistic cases, with all 20 actionable signals promoted and all 20 ordinary-conversation cases excluded from actions.

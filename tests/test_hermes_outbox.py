@@ -42,7 +42,45 @@ def test_hermes_outbox_is_idempotent_and_drives_run_lifecycle(tmp_path) -> None:
     assert run["status"] == "completed"
     assert run["success"] == 1
     assert run["finished_at"] is not None
+    assert run["latency_ms"] >= 0
+    assert len(run["steps"]) == 1
+    assert run["steps"][0]["agent"] == "hermes-manager"
+    assert run["steps"][0]["output"]["accounting"]["status"] == "unavailable"
+    # Reconciliation is idempotent and never duplicates the lifecycle trace.
+    store.sync_hermes_job("job-1", "completed", summary="cited result")
+    assert len(store.get_run(run_id)["steps"]) == 1
     assert store.hermes_job_counts() == {"completed": 1}
+
+
+def test_phone_result_outbox_redelivers_until_ack_and_survives_restart(tmp_path) -> None:
+    path = tmp_path / "operations.db"
+    store = Store(path)
+    run_id = store.create_run("phone", "tool", "Followthrough signal", "archive-phone")
+    store.create_hermes_job(
+        job_id="job-phone",
+        run_id=run_id,
+        archive_id="archive-phone",
+        event_id="event-phone",
+        idempotency_key="followthrough:archive-phone:research:v3",
+        capsule_path=str(tmp_path / "job.json"),
+        category="tool",
+        entity="a useful SDK",
+        source_device_id="memo-phone",
+    )
+    store.sync_hermes_job("job-phone", "completed", summary="Verified result")
+
+    assert store.prepare_phone_deliveries("memo-phone") == 1
+    first = store.pending_phone_deliveries("memo-phone")
+    assert first[0]["summary"] == "Verified result"
+    assert first[0]["attempt"] == 1
+
+    restarted = Store(path)
+    assert restarted.prepare_phone_deliveries("memo-phone") == 0
+    replay = restarted.pending_phone_deliveries("memo-phone")
+    assert replay[0]["receipt_id"] == first[0]["receipt_id"]
+    assert replay[0]["attempt"] == 2
+    assert restarted.acknowledge_phone_delivery("memo-phone", replay[0]["receipt_id"])
+    assert restarted.pending_phone_deliveries("memo-phone") == []
 
 
 def test_policy_revision_supersedes_and_audits_parked_task(tmp_path) -> None:
@@ -85,6 +123,29 @@ def test_policy_revision_supersedes_and_audits_parked_task(tmp_path) -> None:
     history = store.db.execute("SELECT * FROM hermes_task_history").fetchone()
     assert history["task_id"] == "task-v1"
     assert history["outcome"] == "superseded"
+
+
+def test_failed_job_becomes_one_sanitized_eval_case(tmp_path) -> None:
+    store = Store(tmp_path / "operations.db")
+    run_id = store.create_run("phone", "tool", "Followthrough signal", "archive-failure")
+    store.create_hermes_job(
+        job_id="job-failure",
+        run_id=run_id,
+        archive_id="archive-failure",
+        event_id="event-failure",
+        idempotency_key="followthrough:archive-failure:research:v3",
+        capsule_path=str(tmp_path / "job.json"),
+        category="tool",
+        entity="the sanitized tool entity",
+    )
+
+    store.sync_hermes_job("job-failure", "needs_attention", error="worker timed out")
+    store.sync_hermes_job("job-failure", "needs_attention", error="worker timed out")
+
+    rows = store.db.execute("SELECT * FROM eval_cases WHERE run_id=?", (run_id,)).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["input_text"] == "the sanitized tool entity"
+    assert rows[0]["observed"] == "needs_attention"
 
 
 def test_create_retry_exhaustion_dead_letters_and_stops_selection(tmp_path) -> None:

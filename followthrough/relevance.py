@@ -39,6 +39,21 @@ class InformationRoute(str, Enum):
     NOT_INFORMATION_QUERY = "not_information_query"
 
 
+class AutonomyLevel(str, Enum):
+    """The maximum kind of work this decision authorizes."""
+
+    OBSERVE = "observe"
+    ORGANIZE = "organize"
+    INVESTIGATE = "investigate"
+    ACT = "act"
+
+
+class RiskLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class Category(str, Enum):
     REPOSITORY = "repository"
     WEB_TASK = "web_task"
@@ -271,9 +286,50 @@ class RelevanceResult:
 
     @property
     def dispatch_allowed(self) -> bool:
-        return self.actionable and (
-            self.owner_status == OwnerStatus.OWNER or self.ambient_authorized
+        return (
+            self.actionable
+            and (self.owner_status == OwnerStatus.OWNER or self.ambient_authorized)
+            and self.risk_level != RiskLevel.HIGH
         )
+
+    @property
+    def risk_level(self) -> RiskLevel:
+        if any(item.rule_id == "risk.purchase" for item in self.evidence):
+            return RiskLevel.HIGH
+        if self.primary_category in {Category.CONTACT, Category.EVENT}:
+            return RiskLevel.MEDIUM
+        return RiskLevel.LOW
+
+    @property
+    def autonomy_level(self) -> AutonomyLevel:
+        """Return the narrowest truthful authority implied by this signal.
+
+        An explicit wake-word command may authorize execution. Ambient
+        discoveries can be organized or investigated, but never silently
+        acquire the authority to contact people or make external commitments.
+        """
+
+        has_owner_authority = self.owner_status == OwnerStatus.OWNER or self.ambient_authorized
+        if self.actionable and has_owner_authority and self.risk_level == RiskLevel.HIGH:
+            return AutonomyLevel.ORGANIZE
+        if not self.dispatch_allowed:
+            return AutonomyLevel.OBSERVE
+        if self.reason_code == "owner_explicit_memo_command":
+            return AutonomyLevel.ACT
+        if self.primary_category in {Category.TODO, Category.EVENT, Category.CONTACT, Category.GOAL}:
+            return AutonomyLevel.ORGANIZE
+        return AutonomyLevel.INVESTIGATE
+
+    @property
+    def decision_explanation(self) -> str:
+        action = {
+            AutonomyLevel.OBSERVE: "Archived only; no operational action was authorized.",
+            AutonomyLevel.ORGANIZE: "Organized for review without making an external commitment.",
+            AutonomyLevel.INVESTIGATE: "Authorized background research only.",
+            AutonomyLevel.ACT: "Explicit Memo command authorized immediate execution.",
+        }[self.autonomy_level]
+        evidence = self.evidence[-1].explanation if self.evidence else self.reason_code
+        return f"{action} Evidence: {evidence}"
 
     def hermes_payload(self, raw_text: str) -> dict[str, Any] | None:
         """Return raw content only for a verified actionable decision.
@@ -300,6 +356,9 @@ class RelevanceResult:
             "owner_status": self.owner_status.value,
             "ambient_authorized": self.ambient_authorized,
             "information_route": self.information_route.value,
+            "autonomy_level": self.autonomy_level.value,
+            "risk_level": self.risk_level.value,
+            "decision_explanation": self.decision_explanation,
             "categories": [category.value for category in self.categories],
             "primary_category": self.primary_category.value if self.primary_category else None,
             "confidence": self.confidence,
@@ -322,6 +381,16 @@ def _rx(value: str) -> re.Pattern[str]:
 
 
 _RULES: tuple[_Rule, ...] = (
+    _Rule(
+        "risk.purchase",
+        Category.WEB_TASK,
+        _rx(
+            r"\b(?:purchase|order|add\s+to\s+cart|checkout|pay\s+for)\b|"
+            r"\bbuy\s+(?:me\s+)?(?:a|an|the|some)\b"
+        ),
+        0.99,
+        "Recognized a purchase or checkout request requiring confirmation",
+    ),
     _Rule(
         "repository.github_url",
         Category.REPOSITORY,
@@ -454,7 +523,7 @@ _RULES: tuple[_Rule, ...] = (
             r"\b(?:follow[ -]?up\s+with|reach\s+out\s+to|"
             r"send\s+(?:an?\s+)?(?:email|dm|message)\s+to|"
             r"(?:email|dm|message|contact|call)\s+"
-            r"(?!(?:and|or|is|was|were|the|a|an|about|from|does|has|address)\b)"
+            r"(?!(?:and|or|is|was|were|the|a|an|it|this|that|about|from|does|has|address)\b)"
             r"(?:the\s+)?[\w@])"
         ),
         0.93,
@@ -594,6 +663,10 @@ _EMAIL_ACTION = _rx(
     r"\b(?:can\s+you\s+|could\s+you\s+|please\s+)?send\s+(?:me\s+|an?\s+)?email\b|"
     r"\bemail\s+(?:me|[A-Za-z][\w.-]*)\b"
 )
+_SENSITIVE_CREDENTIAL = _rx(
+    r"\b(?:password|passcode|pin|verification\s+code|security\s+code)\b"
+    r".{0,24}\b(?:is|equals?|:)\s*[A-Za-z0-9!@#$%^&*._-]{3,}\b"
+)
 
 
 def information_route(text: str) -> InformationRoute:
@@ -645,6 +718,27 @@ def evaluate_relevance(
             ),
         )
     categories, evidence = _category_evidence(clean)
+    if _SENSITIVE_CREDENTIAL.search(clean):
+        return RelevanceResult(
+            fingerprint,
+            Disposition.IGNORE,
+            False,
+            owner_status,
+            (),
+            None,
+            0.995,
+            "sensitive_content",
+            speaker_evidence
+            + (
+                Evidence(
+                    "privacy.credential_value",
+                    None,
+                    0.995,
+                    "Credential-like content is archive-only and cannot enter operations",
+                ),
+            ),
+            ambient_authorized=ambient_authorized,
+        )
     if (
         _EMAIL_ACTION.search(clean)
         and "email" not in available_capabilities

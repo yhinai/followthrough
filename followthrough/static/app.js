@@ -3,7 +3,24 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character
 let browserListening = false;
 let livekitRoom = null;
 let toastTimer = null;
+let loadInFlight = false;
 const htmlCache = new Map();
+
+function hasConsent() { return Boolean($("#consent")?.checked); }
+
+function syncConsentUi() {
+  const consented = hasConsent();
+  $("#submit").disabled = !consented;
+  $("#listen").disabled = !consented;
+  if (!browserListening) setMicUi("ready", consented ? "LiveKit · ready" : "Consent required");
+}
+
+function requireConsent() {
+  if (hasConsent()) return true;
+  showToast("Choose the consent option before sharing a signal.", "error");
+  $("#consent")?.focus();
+  return false;
+}
 
 // Only touch the DOM when a section's markup actually changed, so the 1.5s poll
 // never wipes hover states, text selection, or in-flight CSS animations.
@@ -50,6 +67,7 @@ const timeAgo = (value) => {
 const label = (value) => String(value || "signal").replaceAll("_", " ");
 
 async function sendSignal(text, utteranceId = null) {
+  if (!requireConsent()) return;
   if (!text.trim()) return;
   $("#submit").disabled = true;
   $("#submit").textContent = "Archiving and triaging…";
@@ -60,7 +78,7 @@ async function sendSignal(text, utteranceId = null) {
     $("#input").value = "";
     await load();
   } catch (error) { showToast(`Followthrough failed: ${error.message}`, "error"); }
-  finally { $("#submit").disabled = false; $("#submit").innerHTML = "Run through Hermes <span>→</span>"; }
+  finally { $("#submit").disabled = !hasConsent(); $("#submit").innerHTML = "Run through Hermes <span>→</span>"; }
 }
 
 async function setMode(mode, resumeParked = false) {
@@ -72,7 +90,7 @@ async function setMode(mode, resumeParked = false) {
 function setMicUi(state, detail = "") {
   const active = state === "listening";
   browserListening = active;
-  $("#listen").disabled = state === "connecting" || state === "stopping";
+  $("#listen").disabled = !hasConsent() || state === "connecting" || state === "stopping";
   $("#listen").setAttribute("aria-pressed", String(active));
   $("#listen").dataset.state = state;
   $("#micLabel").textContent = active ? "Stop web mic" : state === "connecting" ? "Connecting…" : "Web mic";
@@ -88,6 +106,7 @@ async function stopLiveKitMic() {
 
 async function setBrowserMic(on) {
   if (!on) return stopLiveKitMic();
+  if (!requireConsent()) return;
   if (!window.LivekitClient?.Room) {
     setMicUi("error", "LiveKit client failed to load");
     return showToast("LiveKit client is unavailable. Reload and try again.", "error");
@@ -194,6 +213,30 @@ function renderTranscriptLive() {
   setHTML("#transcriptLive", partials
     .map((partial) => `<div class="transcript-partial"><span class="live-dot"></span><div><small>${escapeHtml(label(partial.source))} · hearing now</small><p>${escapeHtml(String(partial.text).slice(0, LIVE_PARTIAL_TEXT_CAP))}</p></div></div>`)
     .join(""));
+}
+
+function renderDevicePresence(devices, unavailable = false) {
+  const connection = $("#connectionState");
+  const title = $("#listeningTitle");
+  if (unavailable) {
+    title.textContent = "Connection unknown";
+    connection.className = "connection-state degraded";
+    connection.innerHTML = "<i></i>Checking phone";
+    return;
+  }
+  const memo = devices.find((device) => device.surface === "memo-android");
+  if (!memo?.connected) {
+    title.textContent = memo ? "Reconnecting" : "Phone not connected";
+    connection.className = "connection-state degraded";
+    connection.innerHTML = `<i></i>${memo ? `${Math.round(Number(memo.stale_seconds || 0))}s stale` : "Offline"}`;
+    return;
+  }
+  title.textContent = "Listening quietly";
+  connection.className = "connection-state live";
+  const activity = memo.last_transcript_activity_at
+    ? `heard ${timeAgo(memo.last_transcript_activity_at)}`
+    : "audio path live";
+  connection.innerHTML = `<i></i>${escapeHtml(activity)}`;
 }
 
 // Partial events can burst several times a second; coalesce repaints so a
@@ -614,9 +657,9 @@ function renderJourney(journey) {
     node.title = stage?.detail || "";
   });
   if (!journey?.event_id) {
-    $("#journeyHeard").textContent = "Listening for the demo phrase…";
+    $("#journeyHeard").textContent = "Listening for something worth doing…";
     $("#journeyDecision").textContent = "Mention it, put your phone away, and Followthrough handles it.";
-    $("#journeyElapsed").textContent = "—";
+    $("#journeyElapsed").textContent = "Ready";
     $("#journeyPhone").textContent = "Runs quietly in the background";
     return;
   }
@@ -637,10 +680,12 @@ function renderJourney(journey) {
 }
 
 async function load() {
+  if (loadInFlight) return;
+  loadInFlight = true;
   try {
     const failures = new Set();
-    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions, journey, workspaceItems] = await Promise.all([
-      safeJson("/api/metrics", {}, failures), safeJson("/api/jobs", [], failures), safeJson("/api/controls", {global:{mode:"unknown"}}, failures), safeJson("/api/memory/operational", [], failures), safeJson("/api/activity", [], failures), safeJson("/api/desktop/doctor", {ready:false}, failures), safeJson("/api/desktop/actions", [], failures), safeJson("/api/computer-use", [], failures), safeJson("/api/journey", {state:"idle",stages:[]}, failures), safeJson("/api/workspace", [], failures)
+    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions, journey, workspaceItems, devices] = await Promise.all([
+      safeJson("/api/metrics", {}, failures), safeJson("/api/jobs", [], failures), safeJson("/api/controls", {global:{mode:"unknown"}}, failures), safeJson("/api/memory/operational", [], failures), safeJson("/api/activity", [], failures), safeJson("/api/desktop/doctor", {ready:false}, failures), safeJson("/api/desktop/actions", [], failures), safeJson("/api/computer-use", [], failures), safeJson("/api/journey", {state:"idle",stages:[]}, failures), safeJson("/api/workspace", [], failures), safeJson("/api/v1/devices", [], failures)
     ]);
     renderAgent(agentSessions);
     renderJourney(journey);
@@ -652,9 +697,7 @@ async function load() {
       setHTML("#systemState", `<span class="pulse"></span> ${healthy ? "Online" : "Needs attention"}`);
       systemState.classList.toggle("healthy", healthy);
     }
-    const connection = $("#connectionState");
-    connection.className = `connection-state ${failures.size ? "degraded" : "live"}`;
-    connection.innerHTML = `<i></i>${failures.size ? `${failures.size} panel${failures.size === 1 ? "" : "s"} reconnecting` : "Live"}`;
+    renderDevicePresence(devices, failures.has("/api/v1/devices"));
     $("#lastSync").textContent = failures.size ? "Partial connection" : `Updated ${new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
     setHTML("#pause", `<span class="pause-icon"></span>${mode === "running" ? "Pause" : "Resume"}`);
     $("#pause").setAttribute("aria-pressed", String(mode !== "running"));
@@ -672,12 +715,16 @@ async function load() {
   } catch (error) {
     const systemState = $("#systemState");
     if (systemState) systemState.textContent = `Server unreachable · ${error.message}`;
-  }
+  } finally { loadInFlight = false; }
 }
 
 $("#sample").onclick = () => { $("#input").value = "Research and safely evaluate https://github.com/pypa/sampleproject"; };
 $("#submit").onclick = () => sendSignal($("#input").value);
 $("#listen").onclick = () => setBrowserMic(!browserListening);
+$("#consent").addEventListener("change", () => {
+  if (!hasConsent() && browserListening) stopLiveKitMic();
+  syncConsentUi();
+});
 $("#pause").onclick = () => setMode(document.body.dataset.mode === "running" ? "paused" : "running", true);
 $("#refreshDesktop").onclick = () => load();
 $("#tabOverview").onclick = () => setView("overview");
@@ -716,11 +763,15 @@ document.addEventListener("keydown", (event) => {
   }
 });
 wireDesktopControl();
+syncConsentUi();
 load();
-setInterval(load, 1500);
+// SSE carries latency-sensitive changes. This slower poll is recovery and
+// aggregate-state refresh, and hidden tabs should consume no background work.
+setInterval(() => { if (!document.hidden) load(); }, 5000);
 const liveEvents = new EventSource("/api/events");
 liveEvents.addEventListener("desktop_action", () => load());
 liveEvents.addEventListener("computer_use_progress", () => load());
+liveEvents.addEventListener("device_presence", () => load());
 liveEvents.addEventListener("computer_use_completed", () => load());
 // Each (re)connect opens with a "ready" frame: refresh page 1 so anything
 // published while disconnected (or shed by the bounded queue) is recovered.
@@ -747,7 +798,11 @@ liveEvents.addEventListener("transcript_archived", (event) => {
     finishedUtterances.set(payload.utterance_id, Date.now());
     if (livePartials.delete(payload.utterance_id)) scheduleLiveRender();
   }
-  if (payload.aggregated) return;
+  if (payload.aggregated) {
+    const components = new Set(payload.component_event_ids || []);
+    transcriptEntries = transcriptEntries.filter((entry) => !components.has(entry.event_id));
+    for (const identifier of components) transcriptIds.delete(identifier);
+  }
   if (!transcriptLoaded) { pendingArchived.push(payload); return; }
   insertTranscriptEntry(payload, {fresh: true});
 });

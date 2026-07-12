@@ -122,8 +122,12 @@ def test_premium_ui_exposes_phone_origin_truthful_health_and_transcript_filters(
     assert 'id="overviewLiveText"' in html
     assert "Memo · Samsung Flip" in html
     assert 'id="connectionState"' in html
-    assert 'failures.size === 1 ? "" : "s"' in js
-    assert "reconnecting" in js
+    assert 'safeJson("/api/v1/devices"' in js
+    assert "function renderDevicePresence" in js
+    assert 'memo.last_transcript_activity_at' in js
+    assert 'memo ? "Reconnecting" : "Phone not connected"' in js
+    assert 'failures.size ? "Partial connection"' in js
+    assert "Reconnecting" in js
     assert 'failures.has("/api/metrics") ? "—"' in js
     assert 'id="transcriptSearch"' in html
     assert 'id="transcriptFilter"' in html
@@ -131,6 +135,20 @@ def test_premium_ui_exposes_phone_origin_truthful_health_and_transcript_filters(
     assert "Memo command" in js
     assert ".transcript-toolbar" in css
     assert ".listening-origin" in css
+    assert 'class="product-intro"' not in html
+    assert "Say it once." not in html
+
+
+def test_engineering_proof_is_progressively_disclosed_but_remains_live() -> None:
+    html = HTML.read_text()
+    css = CSS.read_text()
+
+    assert '<details class="panel desktop-panel disclosure-panel">' in html
+    assert '<details class="panel workbench disclosure-panel">' in html
+    assert '<details class="panel memory-panel disclosure-panel">' in html
+    assert 'id="desktopFrame"' in html
+    assert "Progressive disclosure" in css
+    assert ".disclosure-panel[open]" in css
 
 
 def test_tabs_use_roving_keyboard_focus() -> None:
@@ -157,3 +175,14 @@ def test_browser_microphone_uses_vendored_livekit_with_remote_audio() -> None:
     assert "track.attach()" in js
     assert "setMicrophoneEnabled(false)" in js
     assert "SpeechRecognition" not in js
+
+
+def test_capture_controls_require_visible_user_consent() -> None:
+    html = HTML.read_text()
+    js = JS.read_text()
+
+    assert 'id="consent" type="checkbox"' in html
+    assert 'id="submit" class="primary" type="button" disabled' in html
+    assert 'id="listen" class="secondary livekit-mic" type="button"' in html
+    assert "function requireConsent()" in js
+    assert '$("#consent").addEventListener("change"' in js

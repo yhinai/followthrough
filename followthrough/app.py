@@ -36,9 +36,11 @@ from .models import (
     DesktopLifecycleIn,
     DesktopScrollIn,
     DesktopTypeIn,
+    DeviceHeartbeatIn,
     GlobalControlIn,
     InterestWeightIn,
     LiveKitSessionIn,
+    PhoneDeliveryAckIn,
     RelevanceCorrectionIn,
     SafeModeIn,
     SignalIn,
@@ -338,6 +340,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         category: str,
         named_entity: str,
         *,
+        source_device_id: str | None = None,
         deferred: bool = False,
     ) -> dict[str, object]:
         job_id = str(uuid.uuid4())
@@ -377,6 +380,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             acceptance=acceptance,
             discord_chat_id=discord_id,
             discord_user_id=discord_id,
+            source_device_id=source_device_id,
             initial_state="backlog" if deferred else "pending",
         )
         if deferred:
@@ -426,9 +430,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             agent=config.h_agent,
             source_event_id=source_event_id,
         )
-        task = asyncio.create_task(
-            h_executor.run(session["id"], task_text, start_url=start_url)
-        )
+        task = asyncio.create_task(h_executor.run(session["id"], task_text, start_url=start_url))
         application.state.background_tasks.add(task)
         task.add_done_callback(application.state.background_tasks.discard)
         return session
@@ -507,11 +509,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                     "status": existing_run["status"] if existing_run else "accepted",
                     "run_id": archived["run_id"],
                     **({"job_id": existing_job["id"]} if existing_job else {}),
-                    **(
-                        {"computer_use_id": existing_computer["id"]}
-                        if existing_computer
-                        else {}
-                    ),
+                    **({"computer_use_id": existing_computer["id"]} if existing_computer else {}),
                 }
             return {
                 "event_id": payload.event_id,
@@ -541,7 +539,9 @@ def create_app(config: Settings = settings) -> FastAPI:
                 # A segment folded into an aggregate is archived but never
                 # dispatched itself; the live event must not claim otherwise.
                 "relevant": dispatch_allowed and not suppress_dispatch,
-                "classification": "aggregate_component" if suppress_dispatch else classification.kind,
+                "classification": "aggregate_component"
+                if suppress_dispatch
+                else classification.kind,
                 "aggregated": bool(payload.metadata.get("aggregated")),
                 "component_event_ids": payload.metadata.get("component_event_ids", []),
                 "utterance_id": payload.metadata.get("utterance_id"),
@@ -605,6 +605,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             payload.event_id,
             category,
             subject,
+            source_device_id=payload.device_id,
             deferred=(
                 relevance.reason_code != "owner_explicit_memo_command"
                 and category in {"tool", "startup", "goal"}
@@ -674,6 +675,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 device_id=payload.device_id,
                 surface=payload.surface,
                 response_mode=payload.response_mode,
+                speaker_mode=payload.speaker_mode,
                 ttl_seconds=config.livekit_token_ttl_seconds,
             )
         except RuntimeError as exc:
@@ -685,11 +687,119 @@ def create_app(config: Settings = settings) -> FastAPI:
             "participant_identity": issued.participant_identity,
         }
 
+    def render_device_presence(item: dict[str, object]) -> dict[str, object]:
+        updated_at = datetime.fromisoformat(str(item["updated_at"]))
+        stale_seconds = max(0.0, (datetime.now(UTC) - updated_at).total_seconds())
+        connected = (
+            item.get("state") == "listening"
+            and bool(item.get("microphone_published"))
+            and stale_seconds <= 15
+        )
+        return {
+            **item,
+            "microphone_published": bool(item.get("microphone_published")),
+            "connected": connected,
+            "stale_seconds": round(stale_seconds, 1),
+        }
+
+    @application.post("/api/v1/devices/heartbeat", status_code=202)
+    async def device_heartbeat(payload: DeviceHeartbeatIn) -> dict[str, object]:
+        item = store.upsert_device_presence(
+            device_id=payload.device_id,
+            room_name=payload.room_name,
+            surface=payload.surface,
+            response_mode=payload.response_mode,
+            state=payload.state,
+            microphone_published=payload.microphone_published,
+            last_transcript_activity_at=(
+                _utc(payload.last_transcript_activity_at)
+                if payload.last_transcript_activity_at
+                else None
+            ),
+        )
+        await bus.publish("device_presence", render_device_presence(item))
+        return render_device_presence(item)
+
+    @application.get("/api/v1/devices")
+    async def devices() -> list[dict[str, object]]:
+        return [render_device_presence(item) for item in store.list_device_presence()]
+
+    @application.get("/api/v1/devices/{device_id}")
+    async def device(device_id: str) -> dict[str, object]:
+        item = store.device_presence(device_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="device has not connected")
+        return render_device_presence(item)
+
+    @application.get("/api/v1/devices/{device_id}/deliveries")
+    async def phone_deliveries(
+        device_id: str, limit: int = Query(default=20, ge=1, le=50)
+    ) -> list[dict[str, object]]:
+        """Redeliver terminal results until the originating phone acknowledges them."""
+
+        store.prepare_phone_deliveries(device_id, limit=max(limit, 20))
+        return store.pending_phone_deliveries(device_id, limit=limit)
+
+    @application.post("/api/v1/devices/{device_id}/deliveries/ack")
+    async def acknowledge_phone_delivery(
+        device_id: str, payload: PhoneDeliveryAckIn
+    ) -> dict[str, object]:
+        if not store.acknowledge_phone_delivery(device_id, payload.receipt_id):
+            raise HTTPException(status_code=404, detail="delivery receipt not found")
+        return {"receipt_id": payload.receipt_id, "state": "acknowledged"}
+
+    @application.get("/api/v1/privacy")
+    async def privacy_status() -> dict[str, object]:
+        return {
+            "storage": "local_unencrypted",
+            "retention": "until_deleted",
+            "operational_memory_gate": True,
+            "controls": ["device_export", "device_delete"],
+        }
+
+    @application.get("/api/v1/privacy/devices/{device_id}/export")
+    async def export_device_data(device_id: str) -> dict[str, object]:
+        return archive_store.export_device(device_id)
+
+    @application.delete("/api/v1/privacy/devices/{device_id}")
+    async def delete_device_data(device_id: str) -> dict[str, object]:
+        deleted = archive_store.delete_device(device_id)
+        operations = store.delete_device_operations(
+            device_id,
+            list(deleted["run_ids"]),
+            list(deleted["archive_ids"]),
+        )
+        removed_audio = 0
+        audio_root = config.audio_dir.resolve()
+        for value in deleted["audio_paths"]:
+            path = Path(value).resolve()
+            if path.is_relative_to(audio_root) and path.is_file():
+                path.unlink()
+                removed_audio += 1
+                try:
+                    path.parent.rmdir()
+                except OSError:
+                    pass
+        await bus.publish("device_data_deleted", {"device_id": device_id})
+        return {
+            "device_id": device_id,
+            "events_deleted": deleted["events_deleted"],
+            "audio_files_deleted": removed_audio,
+            "operations_deleted": operations,
+        }
+
     @application.post("/api/v1/transcripts", status_code=202)
     async def transcript_event(payload: TranscriptEventIn) -> dict[str, object]:
         if not payload.consent:
             raise HTTPException(status_code=400, detail="capture consent flag is required")
-        speaker = SpeakerContext.native_owner(payload.device_id)
+        # A dedicated personal capture session can assert the phone owner. In
+        # meeting mode diarization identifies turns, not identity, so fail
+        # closed until the owner explicitly verifies a speaker.
+        speaker = (
+            SpeakerContext.unknown()
+            if payload.metadata.get("speaker_mode") == "meeting"
+            else SpeakerContext.native_owner(payload.device_id)
+        )
         if payload.metadata.get("aggregated"):
             for component_event_id in payload.metadata.get("component_event_ids", []):
                 component = archive_store.by_event(str(component_event_id))
@@ -880,8 +990,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         }
 
     @application.post("/api/signals")
-    async def signal(
-        payload: SignalIn) -> dict[str, object]:
+    async def signal(payload: SignalIn) -> dict[str, object]:
         if not payload.consent:
             raise HTTPException(status_code=400, detail="explicit consent is required")
         event = TranscriptEventIn(
@@ -1087,26 +1196,20 @@ def create_app(config: Settings = settings) -> FastAPI:
         )
 
     @application.get("/api/relevance/{event_id}")
-    async def relevance_decision(
-        event_id: str
-    ) -> dict[str, object]:
+    async def relevance_decision(event_id: str) -> dict[str, object]:
         decision = store.relevance_for_event(event_id)
         if not decision:
             raise HTTPException(status_code=404, detail="relevance decision not found")
         return decision
 
     @application.post("/api/relevance/interests")
-    async def set_interest(
-        payload: InterestWeightIn
-    ) -> dict[str, object]:
+    async def set_interest(payload: InterestWeightIn) -> dict[str, object]:
         weight = InterestWeight(payload.category, payload.weight, payload.source)
         store.set_interest_weight(weight)
         return weight.to_dict()
 
     @application.post("/api/relevance/corrections", status_code=202)
-    async def correct_relevance(
-        payload: RelevanceCorrectionIn
-    ) -> dict[str, object]:
+    async def correct_relevance(payload: RelevanceCorrectionIn) -> dict[str, object]:
         archived = archive_store.by_event(payload.event_id)
         decision = store.relevance_for_event(payload.event_id)
         if not archived or not decision:
@@ -1171,7 +1274,12 @@ def create_app(config: Settings = settings) -> FastAPI:
                 archived["id"], run_id, result.content_fingerprint, category, subject
             )
             await enqueue_durable_job(
-                run_id, archived["id"], payload.event_id, category, subject
+                run_id,
+                archived["id"],
+                payload.event_id,
+                category,
+                subject,
+                source_device_id=archived["device_id"],
             )
         elif not result.dispatch_allowed and run_id:
             cancelled = store.cancel_nonrunning_hermes_job(
@@ -1187,8 +1295,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         }
 
     @application.get("/api/memory/operational")
-    async def operational_memory(
-    ) -> list[dict[str, object]]:
+    async def operational_memory() -> list[dict[str, object]]:
         return store.list_operational_memories()
 
     @application.get("/api/jobs")
@@ -1200,10 +1307,10 @@ def create_app(config: Settings = settings) -> FastAPI:
         return store.list_workspace_items()
 
     @application.patch("/api/workspace/{item_id}")
-    async def update_workspace_item(
-        item_id: str, payload: WorkspaceItemIn
-    ) -> dict[str, object]:
-        item = store.update_workspace_item(item_id, title=payload.title.strip(), group=payload.group)
+    async def update_workspace_item(item_id: str, payload: WorkspaceItemIn) -> dict[str, object]:
+        item = store.update_workspace_item(
+            item_id, title=payload.title.strip(), group=payload.group
+        )
         if not item:
             raise HTTPException(status_code=404, detail="workspace item not found")
         await bus.publish("workspace_updated", {"item_id": item_id})
@@ -1271,14 +1378,11 @@ def create_app(config: Settings = settings) -> FastAPI:
         return controls.status()
 
     @application.get("/api/controls/audit")
-    async def control_audit(
-    ) -> list[dict[str, object]]:
+    async def control_audit() -> list[dict[str, object]]:
         return controls.audit_log()
 
     @application.post("/api/controls/global")
-    async def change_global_control(
-        payload: GlobalControlIn
-    ) -> dict[str, object]:
+    async def change_global_control(payload: GlobalControlIn) -> dict[str, object]:
         return controls.set_global_mode(
             payload.mode,
             actor=payload.actor,
@@ -1287,9 +1391,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         )
 
     @application.post("/api/controls/safe-mode")
-    async def activate_safe_mode(
-        payload: SafeModeIn
-    ) -> dict[str, object]:
+    async def activate_safe_mode(payload: SafeModeIn) -> dict[str, object]:
         return controls.trigger_safe_mode(payload.trigger, actor=payload.actor)
 
     @application.post("/api/controls/capabilities/{capability}")
@@ -1326,15 +1428,11 @@ def create_app(config: Settings = settings) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @application.post("/api/controls/jobs/{run_id}/park")
-    async def park_job(
-        run_id: str, payload: TaskControlIn
-    ) -> dict[str, object]:
+    async def park_job(run_id: str, payload: TaskControlIn) -> dict[str, object]:
         return controls.park_run(run_id, actor=payload.actor, reason_code=payload.reason_code)
 
     @application.post("/api/controls/jobs/resume")
-    async def resume_jobs(
-        payload: TaskControlIn
-    ) -> dict[str, object]:
+    async def resume_jobs(payload: TaskControlIn) -> dict[str, object]:
         return controls.resume_parked(actor=payload.actor, reason_code=payload.reason_code)
 
     @application.get("/api/runs")
@@ -1342,9 +1440,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         return store.list_runs()
 
     @application.get("/api/runs/{run_id}")
-    async def run(
-        run_id: str
-    ) -> dict[str, object]:
+    async def run(run_id: str) -> dict[str, object]:
         found = store.get_run(run_id)
         if not found:
             raise HTTPException(status_code=404, detail="run not found")
@@ -1360,9 +1456,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             "integrations": {
                 "hermes": shutil.which(config.hermes_bin) is not None,
                 "h_company": h_executor.configured,
-                "orgo_remote": bool(
-                    config.orgo_api_key and config.orgo_default_computer_id
-                ),
+                "orgo_remote": bool(config.orgo_api_key and config.orgo_default_computer_id),
                 "spark_local": bool(desktop.local_token),
             },
         }
@@ -1387,9 +1481,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         if not job:
             jobs = store.list_hermes_jobs(limit=1)
             job = jobs[0] if jobs else None
-        event_id = str(
-            (session or {}).get("source_event_id") or (job or {}).get("event_id") or ""
-        )
+        event_id = str((session or {}).get("source_event_id") or (job or {}).get("event_id") or "")
         if not event_id:
             return {"event_id": None, "stages": [], "state": "idle"}
         if not session or session.get("source_event_id") != event_id:
@@ -1403,9 +1495,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         h_state = str((session or {}).get("state") or "pending")
         h_terminal = h_state in H_TERMINAL_STATES
         verified = bool(
-            session
-            and h_state == "completed"
-            and str(session.get("latest_answer") or "").strip()
+            session and h_state == "completed" and str(session.get("latest_answer") or "").strip()
         )
         discord_delivered = bool(job and job.get("notification_state") == "delivered")
         returned_at = (job or {}).get("last_polled_at")
@@ -1484,7 +1574,9 @@ def create_app(config: Settings = settings) -> FastAPI:
             ),
         ]
         started_at = (archived or {}).get("received_at") or (session or {}).get("created_at")
-        ended_at = returned_at or (session or {}).get("finished_at") or (session or {}).get("updated_at")
+        ended_at = (
+            returned_at or (session or {}).get("finished_at") or (session or {}).get("updated_at")
+        )
         elapsed = None
         if started_at and ended_at:
             elapsed = max(
@@ -1509,7 +1601,11 @@ def create_app(config: Settings = settings) -> FastAPI:
             )
         return {
             "event_id": event_id,
-            "state": "failed" if failed else "completed" if returned and discord_delivered else "running",
+            "state": "failed"
+            if failed
+            else "completed"
+            if returned and discord_delivered
+            else "running",
             "transcript": transcript,
             "source": (archived or {}).get("source"),
             "decision": (
@@ -1541,8 +1637,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         }
 
     @application.get("/api/activity")
-    async def activity(
-    ) -> list[dict[str, object]]:
+    async def activity() -> list[dict[str, object]]:
         result: list[dict[str, object]] = []
         for event in archive_store.recent_events(24):
             try:

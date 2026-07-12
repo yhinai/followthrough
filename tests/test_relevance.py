@@ -175,6 +175,22 @@ def test_ordinary_life_is_ignored(text: str) -> None:
     assert result.primary_category == Category.ORDINARY_LIFE
 
 
+def test_describing_a_name_is_not_outbound_contact_intent() -> None:
+    result = evaluate_relevance("I call it Mimo and you will find it at the end.", NATIVE_OWNER)
+    assert result.dispatch_allowed is False
+    assert result.reason_code == "low_signal"
+
+
+def test_spoken_credential_never_enters_operations() -> None:
+    result = evaluate_relevance(
+        "Memo, the password for this is 4569. Call Maya afterward.", NATIVE_OWNER
+    )
+    assert result.dispatch_allowed is False
+    assert result.reason_code == "sensitive_content"
+    assert result.categories == ()
+    assert result.evidence[-1].rule_id == "privacy.credential_value"
+
+
 def test_action_signal_wins_over_ordinary_word() -> None:
     result = evaluate_relevance("Research this coffee startup", OMI_OWNER)
     assert result.actionable is True
@@ -398,3 +414,24 @@ def test_email_request_can_route_when_sender_is_configured() -> None:
     )
     assert result.dispatch_allowed is True
     assert result.primary_category == Category.CONTACT
+
+
+def test_decision_exposes_truthful_autonomy_risk_and_explanation() -> None:
+    explicit = evaluate_relevance("Memo, check the current price of gold", NATIVE_OWNER)
+    ambient = evaluate_relevance("We need to research this new SDK", NATIVE_OWNER)
+    ignored = evaluate_relevance("Lunch was delicious", NATIVE_OWNER)
+
+    assert explicit.to_dict()["autonomy_level"] == "act"
+    assert explicit.to_dict()["risk_level"] == "low"
+    assert "Explicit Memo command" in explicit.to_dict()["decision_explanation"]
+    assert ambient.to_dict()["autonomy_level"] == "investigate"
+    assert ignored.to_dict()["autonomy_level"] == "observe"
+
+
+def test_purchase_is_high_risk_and_never_silently_dispatched() -> None:
+    result = evaluate_relevance("Memo, buy the RTX 5080 now", NATIVE_OWNER)
+
+    assert result.actionable is True
+    assert result.dispatch_allowed is False
+    assert result.to_dict()["risk_level"] == "high"
+    assert result.to_dict()["autonomy_level"] == "organize"

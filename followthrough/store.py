@@ -90,6 +90,19 @@ class Store:
               name TEXT PRIMARY KEY, status TEXT NOT NULL,
               details_json TEXT NOT NULL, updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS device_presence (
+              device_id TEXT PRIMARY KEY, room_name TEXT NOT NULL,
+              surface TEXT NOT NULL, response_mode TEXT NOT NULL,
+              state TEXT NOT NULL, microphone_published INTEGER NOT NULL,
+              last_transcript_activity_at TEXT, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS phone_deliveries (
+              id TEXT PRIMARY KEY, device_id TEXT NOT NULL, job_id TEXT NOT NULL,
+              idempotency_key TEXT NOT NULL UNIQUE, state TEXT NOT NULL DEFAULT 'pending',
+              payload_json TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL, delivered_at TEXT,
+              acknowledged_at TEXT
+            );
             CREATE TABLE IF NOT EXISTS hermes_task_history (
               id TEXT PRIMARY KEY, job_id TEXT NOT NULL, task_id TEXT NOT NULL,
               idempotency_key TEXT NOT NULL, outcome TEXT NOT NULL,
@@ -125,8 +138,57 @@ class Store:
         self._ensure_column("hermes_jobs", "workspace_title", "TEXT")
         self._ensure_column("hermes_jobs", "workspace_group", "TEXT")
         self._ensure_column("hermes_jobs", "workspace_deleted", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("hermes_jobs", "source_device_id", "TEXT")
+        self._ensure_column("relevance_decisions", "autonomy_level", "TEXT NOT NULL DEFAULT 'observe'")
+        self._ensure_column("relevance_decisions", "risk_level", "TEXT NOT NULL DEFAULT 'low'")
+        self._ensure_column("relevance_decisions", "explanation", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("computer_use_sessions", "latest_frame_url", "TEXT")
         self.db.commit()
+
+    def upsert_device_presence(
+        self,
+        *,
+        device_id: str,
+        room_name: str,
+        surface: str,
+        response_mode: str,
+        state: str,
+        microphone_published: bool,
+        last_transcript_activity_at: str | None,
+    ) -> dict[str, Any]:
+        timestamp = now()
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO device_presence(device_id,room_name,surface,response_mode,state,"
+                "microphone_published,last_transcript_activity_at,updated_at) VALUES(?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(device_id) DO UPDATE SET room_name=excluded.room_name,"
+                "surface=excluded.surface,response_mode=excluded.response_mode,state=excluded.state,"
+                "microphone_published=excluded.microphone_published,"
+                "last_transcript_activity_at=excluded.last_transcript_activity_at,"
+                "updated_at=excluded.updated_at",
+                (
+                    device_id,
+                    room_name,
+                    surface,
+                    response_mode,
+                    state,
+                    int(microphone_published),
+                    last_transcript_activity_at,
+                    timestamp,
+                ),
+            )
+            self.db.commit()
+        return self.device_presence(device_id) or {}
+
+    def device_presence(self, device_id: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT * FROM device_presence WHERE device_id=?", (device_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_device_presence(self) -> list[dict[str, Any]]:
+        rows = self.db.execute("SELECT * FROM device_presence ORDER BY updated_at DESC").fetchall()
+        return [dict(row) for row in rows]
 
     def create_computer_session(
         self, *, task: str, agent: str, source_event_id: str | None = None
@@ -143,8 +205,15 @@ class Store:
 
     def update_computer_session(self, identifier: str, **values: Any) -> dict[str, Any]:
         allowed = {
-            "h_session_id", "state", "step_count", "current_action", "latest_answer",
-            "agent_view_url", "error", "finished_at", "latest_frame_url",
+            "h_session_id",
+            "state",
+            "step_count",
+            "current_action",
+            "latest_answer",
+            "agent_view_url",
+            "error",
+            "finished_at",
+            "latest_frame_url",
         }
         changes = {key: value for key, value in values.items() if key in allowed}
         if changes:
@@ -200,7 +269,9 @@ class Store:
                     str(receipt.get("provider") or "unknown"),
                     receipt.get("computer_id"),
                     str(receipt.get("action") or "unknown"),
-                    None if receipt.get("visual_changed") is None else int(bool(receipt["visual_changed"])),
+                    None
+                    if receipt.get("visual_changed") is None
+                    else int(bool(receipt["visual_changed"])),
                     None if receipt.get("noop") is None else int(bool(receipt["noop"])),
                     receipt.get("fingerprint_before"),
                     receipt.get("fingerprint_after"),
@@ -209,7 +280,9 @@ class Store:
                 ),
             )
             self.db.commit()
-        row = self.db.execute("SELECT * FROM desktop_action_receipts WHERE id=?", (identifier,)).fetchone()
+        row = self.db.execute(
+            "SELECT * FROM desktop_action_receipts WHERE id=?", (identifier,)
+        ).fetchone()
         return dict(row) if row else {}
 
     def list_desktop_actions(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -225,17 +298,31 @@ class Store:
         if column not in existing:
             self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
-    def create_run(self, source: str, signal_type: str, title: str, archive_event_id: str | None = None) -> str:
+    def create_run(
+        self, source: str, signal_type: str, title: str, archive_event_id: str | None = None
+    ) -> str:
         run_id = str(uuid.uuid4())
         with self.lock:
-            self.db.execute("INSERT INTO runs(id,text,source,signal_type,title,status,created_at,archive_event_id) VALUES(?,?,?,?,?,?,?,?)", (run_id, "[complete archive]", source, signal_type, title, "queued", now(), archive_event_id))
+            self.db.execute(
+                "INSERT INTO runs(id,text,source,signal_type,title,status,created_at,archive_event_id) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    run_id,
+                    "[complete archive]",
+                    source,
+                    signal_type,
+                    title,
+                    "queued",
+                    now(),
+                    archive_event_id,
+                ),
+            )
             self.db.commit()
         return run_id
 
     def record_relevance(self, archive_id: str, event_id: str, decision: dict[str, Any]) -> None:
         with self.lock:
             self.db.execute(
-                "INSERT OR REPLACE INTO relevance_decisions(archive_id,event_id,content_fingerprint,disposition,owner_status,categories_json,confidence,reason_code,evidence_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO relevance_decisions(archive_id,event_id,content_fingerprint,disposition,owner_status,categories_json,confidence,reason_code,evidence_json,autonomy_level,risk_level,explanation,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     archive_id,
                     event_id,
@@ -246,13 +333,18 @@ class Store:
                     float(decision["confidence"]),
                     decision["reason_code"],
                     json.dumps(decision["evidence"], default=str),
+                    decision.get("autonomy_level", "observe"),
+                    decision.get("risk_level", "low"),
+                    decision.get("decision_explanation", ""),
                     now(),
                 ),
             )
             self.db.commit()
 
     def relevance_for_event(self, event_id: str) -> dict[str, Any] | None:
-        row = self.db.execute("SELECT * FROM relevance_decisions WHERE event_id=?", (event_id,)).fetchone()
+        row = self.db.execute(
+            "SELECT * FROM relevance_decisions WHERE event_id=?", (event_id,)
+        ).fetchone()
         if not row:
             return None
         result = dict(row)
@@ -263,7 +355,9 @@ class Store:
     def interest_model(self) -> InterestModel:
         weights = tuple(
             InterestWeight(Category(row["category"]), float(row["weight"]), row["source"])
-            for row in self.db.execute("SELECT category,weight,source FROM interest_weights ORDER BY category")
+            for row in self.db.execute(
+                "SELECT category,weight,source FROM interest_weights ORDER BY category"
+            )
         )
         corrections = tuple(
             CorrectionRecord(
@@ -298,7 +392,9 @@ class Store:
             )
             self.db.commit()
 
-    def add_operational_memory(self, archive_id: str, run_id: str, fingerprint: str, category: str, entity: str) -> None:
+    def add_operational_memory(
+        self, archive_id: str, run_id: str, fingerprint: str, category: str, entity: str
+    ) -> None:
         with self.lock:
             self.db.execute(
                 "INSERT OR IGNORE INTO operational_memories(id,archive_id,run_id,content_fingerprint,category,entity,created_at) VALUES(?,?,?,?,?,?,?)",
@@ -309,8 +405,45 @@ class Store:
     def list_operational_memories(self, limit: int = 100) -> list[dict[str, Any]]:
         return [
             dict(row)
-            for row in self.db.execute("SELECT * FROM operational_memories ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            for row in self.db.execute(
+                "SELECT * FROM operational_memories ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
         ]
+
+    def delete_device_operations(
+        self, device_id: str, run_ids: list[str], archive_ids: list[str]
+    ) -> dict[str, int]:
+        """Remove device-scoped operational state after capture records are deleted."""
+
+        counts: dict[str, int] = {}
+        with self.lock:
+            self.db.execute("PRAGMA foreign_keys=OFF")
+            if archive_ids:
+                placeholders = ",".join("?" for _ in archive_ids)
+                cursor = self.db.execute(
+                    f"DELETE FROM relevance_decisions WHERE archive_id IN ({placeholders})",
+                    archive_ids,
+                )
+                counts["relevance_decisions"] = cursor.rowcount
+            if run_ids:
+                placeholders = ",".join("?" for _ in run_ids)
+                for table, column in (
+                    ("steps", "run_id"),
+                    ("eval_cases", "run_id"),
+                    ("operational_memories", "run_id"),
+                    ("hermes_jobs", "run_id"),
+                    ("runs", "id"),
+                ):
+                    cursor = self.db.execute(
+                        f"DELETE FROM {table} WHERE {column} IN ({placeholders})", run_ids
+                    )
+                    counts[table] = cursor.rowcount
+            for table in ("phone_deliveries", "device_presence"):
+                cursor = self.db.execute(f"DELETE FROM {table} WHERE device_id=?", (device_id,))
+                counts[table] = cursor.rowcount
+            self.db.execute("PRAGMA foreign_keys=ON")
+            self.db.commit()
+        return counts
 
     def create_hermes_job(
         self,
@@ -324,22 +457,122 @@ class Store:
         category: str,
         entity: str,
         intent: str = "Research and evaluate the named item, then return cited findings and a safe next action.",
-        acceptance: list[str] | tuple[str, ...] = ("Use primary sources", "Verify claims", "Record blocked effects"),
+        acceptance: list[str] | tuple[str, ...] = (
+            "Use primary sources",
+            "Verify claims",
+            "Record blocked effects",
+        ),
         discord_chat_id: str | None = None,
         discord_user_id: str | None = None,
+        source_device_id: str | None = None,
         initial_state: str = "pending",
     ) -> tuple[dict[str, Any], bool]:
         timestamp = now()
         with self.lock:
-            existing = self.db.execute("SELECT * FROM hermes_jobs WHERE run_id=? OR archive_id=? OR event_id=?", (run_id, archive_id, event_id)).fetchone()
+            existing = self.db.execute(
+                "SELECT * FROM hermes_jobs WHERE run_id=? OR archive_id=? OR event_id=?",
+                (run_id, archive_id, event_id),
+            ).fetchone()
             if existing:
                 return dict(existing), False
             self.db.execute(
-                "INSERT INTO hermes_jobs(id,run_id,archive_id,event_id,idempotency_key,state,capsule_path,category,entity,intent,acceptance_json,discord_chat_id,discord_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (job_id, run_id, archive_id, event_id, idempotency_key, initial_state, capsule_path, category, entity, intent[:500], json.dumps(list(acceptance)[:20]), discord_chat_id, discord_user_id, timestamp, timestamp),
+                "INSERT INTO hermes_jobs(id,run_id,archive_id,event_id,idempotency_key,state,capsule_path,category,entity,intent,acceptance_json,discord_chat_id,discord_user_id,source_device_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    job_id,
+                    run_id,
+                    archive_id,
+                    event_id,
+                    idempotency_key,
+                    initial_state,
+                    capsule_path,
+                    category,
+                    entity,
+                    intent[:500],
+                    json.dumps(list(acceptance)[:20]),
+                    discord_chat_id,
+                    discord_user_id,
+                    source_device_id,
+                    timestamp,
+                    timestamp,
+                ),
             )
             self.db.commit()
         return self.hermes_job(job_id) or {}, True
+
+    def prepare_phone_deliveries(self, device_id: str, limit: int = 50) -> int:
+        """Materialize terminal results into a durable, idempotent phone outbox."""
+
+        timestamp = now()
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT h.id AS job_id,h.run_id,h.event_id,h.category,h.entity,h.state,h.updated_at,"
+                "COALESCE(NULLIF(c.latest_answer,''),NULLIF(r.summary,''),NULLIF(h.latest_outcome,''),"
+                "NULLIF(c.error,''),NULLIF(h.last_error,'')) AS summary "
+                "FROM hermes_jobs h LEFT JOIN runs r ON r.id=h.run_id "
+                "LEFT JOIN computer_use_sessions c ON c.source_event_id=h.event_id "
+                "WHERE h.source_device_id=? AND h.state IN ('completed','dead_letter','needs_attention','cancelled') "
+                "AND (h.category!='web_task' OR c.state IN ('completed','failed','timed_out','interrupted','configuration_required')) "
+                "ORDER BY h.updated_at LIMIT ?",
+                (device_id, limit),
+            ).fetchall()
+            created = 0
+            for row in rows:
+                key = f"phone-result:{row['job_id']}:v1"
+                payload = {
+                    "delivery_id": key,
+                    "job_id": row["job_id"],
+                    "run_id": row["run_id"],
+                    "event_id": row["event_id"],
+                    "state": row["state"],
+                    "category": row["category"],
+                    "entity": row["entity"],
+                    "summary": row["summary"],
+                    "completed_at": row["updated_at"],
+                }
+                cursor = self.db.execute(
+                    "INSERT OR IGNORE INTO phone_deliveries(id,device_id,job_id,idempotency_key,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), device_id, row["job_id"], key, json.dumps(payload, default=str), timestamp, timestamp),
+                )
+                created += cursor.rowcount
+            self.db.commit()
+        return created
+
+    def pending_phone_deliveries(self, device_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Lease pending results without removing them; an explicit ACK is required."""
+
+        timestamp = now()
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT * FROM phone_deliveries WHERE device_id=? AND state IN ('pending','delivered') "
+                "ORDER BY created_at LIMIT ?",
+                (device_id, limit),
+            ).fetchall()
+            if rows:
+                placeholders = ",".join("?" for _ in rows)
+                self.db.execute(
+                    f"UPDATE phone_deliveries SET state='delivered',attempts=attempts+1,delivered_at=COALESCE(delivered_at,?),updated_at=? WHERE id IN ({placeholders})",
+                    (timestamp, timestamp, *(row["id"] for row in rows)),
+                )
+                self.db.commit()
+        return [
+            {
+                **json.loads(row["payload_json"]),
+                "receipt_id": row["id"],
+                "attempt": int(row["attempts"]) + 1,
+            }
+            for row in rows
+        ]
+
+    def acknowledge_phone_delivery(self, device_id: str, receipt_id: str) -> bool:
+        timestamp = now()
+        with self.lock:
+            cursor = self.db.execute(
+                "UPDATE phone_deliveries SET state='acknowledged',acknowledged_at=COALESCE(acknowledged_at,?),updated_at=? "
+                "WHERE id=? AND device_id=? AND state IN ('pending','delivered','acknowledged')",
+                (timestamp, timestamp, receipt_id, device_id),
+            )
+            self.db.commit()
+        return cursor.rowcount == 1
 
     def hermes_job(self, job_id: str) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM hermes_jobs WHERE id=?", (job_id,)).fetchone()
@@ -362,37 +595,72 @@ class Store:
         return dict(row) if row else None
 
     def pending_hermes_jobs(self, limit: int = 10) -> list[dict[str, Any]]:
-        return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs WHERE state IN ('pending','retry','dispatching') ORDER BY created_at LIMIT ?", (limit,)).fetchall()]
+        return [
+            dict(row)
+            for row in self.db.execute(
+                "SELECT * FROM hermes_jobs WHERE state IN ('pending','retry','dispatching') ORDER BY created_at LIMIT ?",
+                (limit,),
+            ).fetchall()
+        ]
 
     def unnotified_hermes_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
-        return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND notification_state != 'subscribed' AND state NOT IN ('completed','cancelled') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()]
+        return [
+            dict(row)
+            for row in self.db.execute(
+                "SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND notification_state != 'subscribed' AND state NOT IN ('completed','cancelled') ORDER BY updated_at LIMIT ?",
+                (limit,),
+            ).fetchall()
+        ]
 
     def active_hermes_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
-        return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()]
+        return [
+            dict(row)
+            for row in self.db.execute(
+                "SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?",
+                (limit,),
+            ).fetchall()
+        ]
 
     def mark_hermes_dispatching(self, job_id: str) -> None:
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET state='dispatching',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?", (now(), job_id))
+            self.db.execute(
+                "UPDATE hermes_jobs SET state='dispatching',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?",
+                (now(), job_id),
+            )
             self.db.commit()
 
     def mark_hermes_enqueued(self, job_id: str, task_id: str) -> None:
         timestamp = now()
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET task_id=?,state='enqueued',last_error=NULL,last_sync_at=?,updated_at=? WHERE id=?", (task_id, timestamp, timestamp, job_id))
-            self.db.execute("UPDATE runs SET status='queued' WHERE id=(SELECT run_id FROM hermes_jobs WHERE id=?)", (job_id,))
+            self.db.execute(
+                "UPDATE hermes_jobs SET task_id=?,state='enqueued',last_error=NULL,last_sync_at=?,updated_at=? WHERE id=?",
+                (task_id, timestamp, timestamp, job_id),
+            )
+            self.db.execute(
+                "UPDATE runs SET status='queued' WHERE id=(SELECT run_id FROM hermes_jobs WHERE id=?)",
+                (job_id,),
+            )
             self.db.commit()
 
     def mark_hermes_retry(self, job_id: str, error: str) -> None:
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET state='retry',last_error=?,updated_at=? WHERE id=?", (error[:500], now(), job_id))
+            self.db.execute(
+                "UPDATE hermes_jobs SET state='retry',last_error=?,updated_at=? WHERE id=?",
+                (error[:500], now(), job_id),
+            )
             self.db.commit()
 
     def mark_hermes_notification(self, job_id: str, state: str, error: str | None = None) -> None:
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET notification_state=?,last_error=COALESCE(?,last_error),updated_at=? WHERE id=?", (state, error[:500] if error else None, now(), job_id))
+            self.db.execute(
+                "UPDATE hermes_jobs SET notification_state=?,last_error=COALESCE(?,last_error),updated_at=? WHERE id=?",
+                (state, error[:500] if error else None, now(), job_id),
+            )
             self.db.commit()
 
-    def sync_hermes_job(self, job_id: str, state: str, summary: str | None = None, error: str | None = None) -> None:
+    def sync_hermes_job(
+        self, job_id: str, state: str, summary: str | None = None, error: str | None = None
+    ) -> None:
         timestamp = now()
         run_status = {
             "queued": "queued",
@@ -404,10 +672,20 @@ class Store:
             "cancelled": "cancelled",
         }.get(state, state)
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET state=?,last_error=?,last_sync_at=?,updated_at=? WHERE id=?", (state, error[:500] if error else None, timestamp, timestamp, job_id))
-            job = self.db.execute("SELECT run_id FROM hermes_jobs WHERE id=?", (job_id,)).fetchone()
+            self.db.execute(
+                "UPDATE hermes_jobs SET state=?,last_error=?,last_sync_at=?,updated_at=? WHERE id=?",
+                (state, error[:500] if error else None, timestamp, timestamp, job_id),
+            )
+            job = self.db.execute(
+                "SELECT run_id,category,entity,created_at FROM hermes_jobs WHERE id=?",
+                (job_id,),
+            ).fetchone()
             if job:
-                fields: dict[str, Any] = {"status": run_status}
+                created_at = datetime.fromisoformat(str(job["created_at"]))
+                latency_ms = max(
+                    0, int((datetime.fromisoformat(timestamp) - created_at).total_seconds() * 1000)
+                )
+                fields: dict[str, Any] = {"status": run_status, "latency_ms": latency_ms}
                 if summary:
                     fields["summary"] = summary[:20_000]
                 if state == "completed":
@@ -415,14 +693,79 @@ class Store:
                 elif state in {"dead_letter", "cancelled"}:
                     fields.update({"finished_at": timestamp, "success": 0})
                 clause = ",".join(f"{key}=?" for key in fields)
-                self.db.execute(f"UPDATE runs SET {clause} WHERE id=?", (*fields.values(), job["run_id"]))
+                self.db.execute(
+                    f"UPDATE runs SET {clause} WHERE id=?", (*fields.values(), job["run_id"])
+                )
+                if state in {"completed", "dead_letter", "needs_attention", "cancelled"}:
+                    prior = self.db.execute(
+                        "SELECT 1 FROM steps WHERE run_id=? AND agent='hermes-manager' AND status=?",
+                        (job["run_id"], state),
+                    ).fetchone()
+                    if not prior:
+                        output = {
+                            "job_id": job_id,
+                            "state": state,
+                            "summary": summary,
+                            "error": error,
+                            "accounting": {
+                                "status": "unavailable",
+                                "reason": "Hermes task receipts do not expose token usage",
+                            },
+                        }
+                        self.db.execute(
+                            "INSERT INTO steps(id,run_id,agent,status,input_summary,output_json,"
+                            "started_at,finished_at,latency_ms,input_tokens,output_tokens,"
+                            "estimated_cost_usd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                str(uuid.uuid4()),
+                                job["run_id"],
+                                "hermes-manager",
+                                state,
+                                f"{job['category']}: {str(job['entity'])[:300]}",
+                                json.dumps(output, default=str),
+                                job["created_at"],
+                                timestamp,
+                                latency_ms,
+                                0,
+                                0,
+                                0.0,
+                            ),
+                        )
+                    if state in {"dead_letter", "needs_attention"}:
+                        existing_eval = self.db.execute(
+                            "SELECT 1 FROM eval_cases WHERE run_id=? AND observed=?",
+                            (job["run_id"], state),
+                        ).fetchone()
+                        if not existing_eval:
+                            self.db.execute(
+                                "INSERT INTO eval_cases(id,run_id,input_text,expected,observed,"
+                                "created_at) VALUES(?,?,?,?,?,?)",
+                                (
+                                    str(uuid.uuid4()),
+                                    job["run_id"],
+                                    str(job["entity"])[:500],
+                                    "successful completion or explicit policy block",
+                                    state,
+                                    timestamp,
+                                ),
+                            )
             self.db.commit()
 
     def hermes_job_counts(self) -> dict[str, int]:
-        return {row["state"]: row["count"] for row in self.db.execute("SELECT state,COUNT(*) count FROM hermes_jobs GROUP BY state")}
+        return {
+            row["state"]: row["count"]
+            for row in self.db.execute(
+                "SELECT state,COUNT(*) count FROM hermes_jobs GROUP BY state"
+            )
+        }
 
     def list_hermes_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
-        return [dict(row) for row in self.db.execute("SELECT * FROM hermes_jobs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()]
+        return [
+            dict(row)
+            for row in self.db.execute(
+                "SELECT * FROM hermes_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        ]
 
     def list_workspace_items(self, limit: int = 200) -> list[dict[str, Any]]:
         rows = self.db.execute(
@@ -431,16 +774,25 @@ class Store:
             (limit,),
         ).fetchall()
         category_groups = {
-            "repository": "research", "web_task": "research", "tool": "research",
-            "startup": "research", "performance": "research", "todo": "tasks",
-            "contact": "tasks", "goal": "tasks", "event": "events",
+            "repository": "research",
+            "web_task": "research",
+            "tool": "research",
+            "startup": "research",
+            "performance": "research",
+            "todo": "tasks",
+            "contact": "tasks",
+            "goal": "tasks",
+            "event": "events",
         }
         return [
             {
                 **dict(row),
                 "title": row["workspace_title"] or row["entity"],
-                "group": row["workspace_group"] or (
-                    "backlog" if row["state"] == "backlog" else category_groups.get(row["category"], "backlog")
+                "group": row["workspace_group"]
+                or (
+                    "backlog"
+                    if row["state"] == "backlog"
+                    else category_groups.get(row["category"], "backlog")
                 ),
             }
             for row in rows
@@ -470,11 +822,17 @@ class Store:
 
     def kanban_pending_create(self, *, limit: int) -> list[dict[str, Any]]:
         with self.lock:
-            rows = self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NULL AND state IN ('pending','retry','dispatching') AND attempts<5 ORDER BY created_at LIMIT ?", (limit,)).fetchall()
+            rows = self.db.execute(
+                "SELECT * FROM hermes_jobs WHERE task_id IS NULL AND state IN ('pending','retry','dispatching') AND attempts<5 ORDER BY created_at LIMIT ?",
+                (limit,),
+            ).fetchall()
             identifiers = [row["id"] for row in rows]
             if identifiers:
                 placeholders = ",".join("?" for _ in identifiers)
-                self.db.execute(f"UPDATE hermes_jobs SET state='dispatching',attempts=attempts+1,updated_at=? WHERE id IN ({placeholders})", (now(), *identifiers))
+                self.db.execute(
+                    f"UPDATE hermes_jobs SET state='dispatching',attempts=attempts+1,updated_at=? WHERE id IN ({placeholders})",
+                    (now(), *identifiers),
+                )
                 self.db.commit()
         return [
             {
@@ -489,7 +847,15 @@ class Store:
             for row in rows
         ]
 
-    def kanban_record_created(self, run_id: str, *, task_id: str, idempotency_key: str, capsule_path: str, hermes_status: str) -> bool:
+    def kanban_record_created(
+        self,
+        run_id: str,
+        *,
+        task_id: str,
+        idempotency_key: str,
+        capsule_path: str,
+        hermes_status: str,
+    ) -> bool:
         timestamp = now()
         with self.lock:
             job = self.db.execute("SELECT * FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
@@ -501,7 +867,16 @@ class Store:
             next_state = "enqueued" if accepted else job["state"]
             self.db.execute(
                 "UPDATE hermes_jobs SET task_id=?,idempotency_key=?,capsule_path=?,state=?,hermes_status=?,last_error=NULL,last_sync_at=?,updated_at=? WHERE run_id=?",
-                (task_id, idempotency_key, capsule_path, next_state, hermes_status, timestamp, timestamp, run_id),
+                (
+                    task_id,
+                    idempotency_key,
+                    capsule_path,
+                    next_state,
+                    hermes_status,
+                    timestamp,
+                    timestamp,
+                    run_id,
+                ),
             )
             if accepted:
                 self.db.execute("UPDATE runs SET status='queued' WHERE id=?", (run_id,))
@@ -510,15 +885,23 @@ class Store:
 
     def kanban_record_create_failure(self, run_id: str, *, error: str) -> None:
         with self.lock:
-            job = self.db.execute("SELECT attempts,state FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
+            job = self.db.execute(
+                "SELECT attempts,state FROM hermes_jobs WHERE run_id=?", (run_id,)
+            ).fetchone()
             if not job or job["state"] != "dispatching":
                 return
             terminal = int(job["attempts"]) >= 5
             state = "dead_letter" if terminal else "retry"
             timestamp = now()
-            self.db.execute("UPDATE hermes_jobs SET state=?,last_error=?,updated_at=? WHERE run_id=?", (state, error[:500], timestamp, run_id))
+            self.db.execute(
+                "UPDATE hermes_jobs SET state=?,last_error=?,updated_at=? WHERE run_id=?",
+                (state, error[:500], timestamp, run_id),
+            )
             if terminal:
-                self.db.execute("UPDATE runs SET status='failed',success=0,finished_at=? WHERE id=?", (timestamp, run_id))
+                self.db.execute(
+                    "UPDATE runs SET status='failed',success=0,finished_at=? WHERE id=?",
+                    (timestamp, run_id),
+                )
             self.db.commit()
 
     def kanban_pending_notifications(self, *, limit: int) -> list[dict[str, Any]]:
@@ -564,14 +947,22 @@ class Store:
 
     def kanban_record_notified(self, run_id: str, *, receipt: dict[str, str]) -> None:
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET notification_state='delivered',notification_json=?,last_error=NULL,updated_at=? WHERE run_id=?", (json.dumps(receipt, sort_keys=True), now(), run_id))
+            self.db.execute(
+                "UPDATE hermes_jobs SET notification_state='delivered',notification_json=?,last_error=NULL,updated_at=? WHERE run_id=?",
+                (json.dumps(receipt, sort_keys=True), now(), run_id),
+            )
             self.db.commit()
 
     def kanban_record_notification_failure(self, run_id: str, *, error: str) -> None:
         with self.lock:
-            job = self.db.execute("SELECT notification_attempts FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
+            job = self.db.execute(
+                "SELECT notification_attempts FROM hermes_jobs WHERE run_id=?", (run_id,)
+            ).fetchone()
             state = "failed" if job and int(job["notification_attempts"]) >= 5 else "retry"
-            self.db.execute("UPDATE hermes_jobs SET notification_state=?,last_error=?,updated_at=? WHERE run_id=?", (state, error[:500], now(), run_id))
+            self.db.execute(
+                "UPDATE hermes_jobs SET notification_state=?,last_error=?,updated_at=? WHERE run_id=?",
+                (state, error[:500], now(), run_id),
+            )
             self.db.commit()
 
     def kanban_active(self, *, limit: int) -> list[dict[str, Any]]:
@@ -582,10 +973,23 @@ class Store:
                 "event_id": row["event_id"],
                 "category": row["category"],
             }
-            for row in self.db.execute("SELECT run_id,task_id,event_id,category FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()
+            for row in self.db.execute(
+                "SELECT run_id,task_id,event_id,category FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?",
+                (limit,),
+            ).fetchall()
         ]
 
-    def kanban_record_reconciled(self, run_id: str, *, task_id: str, state: str, hermes_status: str, latest_outcome: str, diagnostics: list[str] | tuple[str, ...], summary: str | None = None) -> bool:
+    def kanban_record_reconciled(
+        self,
+        run_id: str,
+        *,
+        task_id: str,
+        state: str,
+        hermes_status: str,
+        latest_outcome: str,
+        diagnostics: list[str] | tuple[str, ...],
+        summary: str | None = None,
+    ) -> bool:
         timestamp = now()
         run_status = {
             "queued": "queued",
@@ -636,7 +1040,10 @@ class Store:
 
     def kanban_record_reconcile_failure(self, run_id: str, *, error: str) -> None:
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET last_error=?,last_sync_at=?,updated_at=? WHERE run_id=?", (error[:500], now(), now(), run_id))
+            self.db.execute(
+                "UPDATE hermes_jobs SET last_error=?,last_sync_at=?,updated_at=? WHERE run_id=?",
+                (error[:500], now(), now(), run_id),
+            )
             self.db.commit()
 
     def heartbeat(self, name: str, status: str, details: dict[str, Any] | None = None) -> None:
@@ -675,13 +1082,24 @@ class Store:
                 raise ValueError("Hermes task changed before supersession")
             self.db.execute(
                 "INSERT INTO hermes_task_history(id,job_id,task_id,idempotency_key,outcome,reason,archived_at) VALUES(?,?,?,?,?,?,?)",
-                (str(uuid.uuid4()), job["id"], expected_task_id, job["idempotency_key"], "superseded", reason[:500], timestamp),
+                (
+                    str(uuid.uuid4()),
+                    job["id"],
+                    expected_task_id,
+                    job["idempotency_key"],
+                    "superseded",
+                    reason[:500],
+                    timestamp,
+                ),
             )
             self.db.execute(
                 "UPDATE hermes_jobs SET task_id=NULL,idempotency_key=?,entity=COALESCE(?,entity),state='retry',notification_state='pending',notification_json=NULL,hermes_status='superseded',latest_outcome='superseded',diagnostics_json='[]',last_error=?,updated_at=? WHERE run_id=?",
                 (idempotency_key, replacement_entity, reason[:500], timestamp, run_id),
             )
-            self.db.execute("UPDATE runs SET status='queued',success=NULL,finished_at=NULL WHERE id=?", (run_id,))
+            self.db.execute(
+                "UPDATE runs SET status='queued',success=NULL,finished_at=NULL WHERE id=?",
+                (run_id,),
+            )
             self.db.commit()
 
     def cancel_nonrunning_hermes_job(self, run_id: str, *, reason: str) -> bool:
@@ -728,10 +1146,28 @@ class Store:
             self.db.execute(f"UPDATE runs SET {clause} WHERE id = ?", (*fields.values(), run_id))
             self.db.commit()
 
-    def add_step(self, run_id: str, agent: str, status: str, input_summary: str, output: Any, **meta: Any) -> str:
+    def add_step(
+        self, run_id: str, agent: str, status: str, input_summary: str, output: Any, **meta: Any
+    ) -> str:
         step_id = str(uuid.uuid4())
         with self.lock:
-            self.db.execute("INSERT INTO steps(id,run_id,agent,status,input_summary,output_json,started_at,finished_at,latency_ms,input_tokens,output_tokens,estimated_cost_usd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (step_id, run_id, agent, status, input_summary, json.dumps(output, default=str), meta.get("started_at", now()), meta.get("finished_at"), meta.get("latency_ms", 0), meta.get("input_tokens", 0), meta.get("output_tokens", 0), meta.get("estimated_cost_usd", 0.0)))
+            self.db.execute(
+                "INSERT INTO steps(id,run_id,agent,status,input_summary,output_json,started_at,finished_at,latency_ms,input_tokens,output_tokens,estimated_cost_usd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    step_id,
+                    run_id,
+                    agent,
+                    status,
+                    input_summary,
+                    json.dumps(output, default=str),
+                    meta.get("started_at", now()),
+                    meta.get("finished_at"),
+                    meta.get("latency_ms", 0),
+                    meta.get("input_tokens", 0),
+                    meta.get("output_tokens", 0),
+                    meta.get("estimated_cost_usd", 0.0),
+                ),
+            )
             self.db.commit()
         return step_id
 
@@ -740,38 +1176,78 @@ class Store:
         if not row:
             return None
         out = dict(row)
-        out["steps"] = [dict(s) | {"output": json.loads(s["output_json"])} for s in self.db.execute("SELECT * FROM steps WHERE run_id = ? ORDER BY rowid", (run_id,)).fetchall()]
+        out["steps"] = [
+            dict(s) | {"output": json.loads(s["output_json"])}
+            for s in self.db.execute(
+                "SELECT * FROM steps WHERE run_id = ? ORDER BY rowid", (run_id,)
+            ).fetchall()
+        ]
         return out
 
     def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
-        return [dict(r) for r in self.db.execute("SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()]
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        ]
 
     def metrics(self) -> dict[str, Any]:
-        r = self.db.execute("SELECT COUNT(*) total, SUM(status='completed') completed, AVG(latency_ms) latency FROM runs").fetchone()
-        users = self.db.execute("SELECT COUNT(*) FROM users WHERE first_use_at IS NOT NULL").fetchone()[0]
-        return {"operational_total": r[0] or 0, "completed": r[1] or 0, "avg_latency_ms": round(r[2] or 0), "activated_users": users}
+        r = self.db.execute(
+            "SELECT COUNT(*) total, SUM(status='completed') completed, AVG(latency_ms) latency FROM runs"
+        ).fetchone()
+        users = self.db.execute(
+            "SELECT COUNT(*) FROM users WHERE first_use_at IS NOT NULL"
+        ).fetchone()[0]
+        return {
+            "operational_total": r[0] or 0,
+            "completed": r[1] or 0,
+            "avg_latency_ms": round(r[2] or 0),
+            "activated_users": users,
+        }
 
     def add_eval(self, run_id: str | None, input_text: str, expected: str, observed: str) -> None:
         with self.lock:
-            self.db.execute("INSERT INTO eval_cases(id,run_id,input_text,expected,observed,created_at) VALUES(?,?,?,?,?,?)", (str(uuid.uuid4()), run_id, input_text, expected, observed, now()))
+            self.db.execute(
+                "INSERT INTO eval_cases(id,run_id,input_text,expected,observed,created_at) VALUES(?,?,?,?,?,?)",
+                (str(uuid.uuid4()), run_id, input_text, expected, observed, now()),
+            )
             self.db.commit()
 
     def signup(self, email: str, source: str) -> None:
         with self.lock:
-            self.db.execute("INSERT OR IGNORE INTO users(email,source,created_at) VALUES(?,?,?)", (email.lower().strip(), source, now()))
+            self.db.execute(
+                "INSERT OR IGNORE INTO users(email,source,created_at) VALUES(?,?,?)",
+                (email.lower().strip(), source, now()),
+            )
             self.db.commit()
 
     def activate(self, email: str) -> None:
         with self.lock:
-            self.db.execute("UPDATE users SET first_use_at=? WHERE email=?", (now(), email.lower().strip()))
+            self.db.execute(
+                "UPDATE users SET first_use_at=? WHERE email=?", (now(), email.lower().strip())
+            )
             self.db.commit()
 
     def add_role(self, name: str, job: str, tools: list[str], guardrails: str) -> dict[str, Any]:
-        value = {"id": str(uuid.uuid4()), "name": name, "job": job, "tools": tools, "guardrails": guardrails, "created_at": now()}
+        value = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "job": job,
+            "tools": tools,
+            "guardrails": guardrails,
+            "created_at": now(),
+        }
         with self.lock:
-            self.db.execute("INSERT INTO roles(id,name,job,tools_json,guardrails,created_at) VALUES(?,?,?,?,?,?)", (value["id"], name, job, json.dumps(tools), guardrails, value["created_at"]))
+            self.db.execute(
+                "INSERT INTO roles(id,name,job,tools_json,guardrails,created_at) VALUES(?,?,?,?,?,?)",
+                (value["id"], name, job, json.dumps(tools), guardrails, value["created_at"]),
+            )
             self.db.commit()
         return value
 
     def roles(self) -> list[dict[str, Any]]:
-        return [{**dict(r), "tools": json.loads(r["tools_json"])} for r in self.db.execute("SELECT * FROM roles ORDER BY created_at").fetchall()]
+        return [
+            {**dict(r), "tools": json.loads(r["tools_json"])}
+            for r in self.db.execute("SELECT * FROM roles ORDER BY created_at").fetchall()
+        ]
