@@ -124,6 +124,7 @@ function renderCurrentJob(jobs, activity) {
 function renderDesktop(doctor, actions) {
   const state = $("#desktopState");
   const frame = $("#desktopFrame");
+  const live = $("#desktopLive");
   const empty = $("#desktopEmpty");
   state.className = `desktop-state ${doctor.ready ? "online" : "offline"}`;
   state.innerHTML = `<i></i>${doctor.ready ? "Live" : "Not configured"}`;
@@ -133,10 +134,16 @@ function renderDesktop(doctor, actions) {
   const shot = doctor.screenshot || {};
   $("#desktopResolution").textContent = shot.width ? `${shot.width} × ${shot.height}` : "—";
   if (doctor.ready) {
-    frame.hidden = false; empty.hidden = true;
-    frame.src = `/api/desktop/screenshot?t=${Date.now()}`;
+    empty.hidden = true;
+    if (doctor.provider === "orgo-local") {
+      frame.hidden = true; live.hidden = false;
+      if (!live.src) live.src = "/novnc/vnc_lite.html?autoconnect=true&resize=scale&path=api/desktop/vnc";
+    } else {
+      live.hidden = true; frame.hidden = false;
+      frame.src = `/api/desktop/screenshot?t=${Date.now()}`;
+    }
   } else {
-    frame.hidden = true; empty.hidden = false;
+    frame.hidden = true; live.hidden = true; empty.hidden = false;
   }
   const action = actions[0];
   $("#desktopAction").textContent = action ? label(action.action) : "No desktop action yet";

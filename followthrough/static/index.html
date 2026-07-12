@@ -45,15 +45,16 @@
 
     <section class="panel desktop-panel" aria-labelledby="desktopTitle">
       <div class="panel-head">
-        <div><p class="kicker">Computer use · Orgo control plane</p><h2 id="desktopTitle">Live agent desktop</h2></div>
+        <div><p class="kicker">Computer use · Spark local control plane</p><h2 id="desktopTitle">Live agent desktop</h2></div>
         <span id="desktopState" class="desktop-state offline"><i></i>Not configured</span>
       </div>
       <div class="desktop-grid">
         <div class="desktop-viewer">
           <div class="desktop-chrome"><span><i></i><i></i><i></i></span><b id="desktopRoute">Automatic routing</b><small id="desktopResolution">—</small></div>
           <div class="desktop-screen">
-            <img id="desktopFrame" alt="Live Orgo agent desktop" hidden>
-            <div id="desktopEmpty" class="desktop-empty"><span>⌁</span><strong>Desktop waiting</strong><small>Local Orgo is preferred; the default remote computer is the fallback.</small></div>
+            <iframe id="desktopLive" title="Live Spark agent desktop" hidden></iframe>
+            <img id="desktopFrame" alt="Remote agent desktop" hidden>
+            <div id="desktopEmpty" class="desktop-empty"><span>⌁</span><strong>Desktop waiting</strong><small>Spark’s local desktop is preferred; Orgo remains an optional remote fallback.</small></div>
           </div>
         </div>
         <div class="desktop-evidence">

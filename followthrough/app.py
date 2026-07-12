@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -279,12 +279,15 @@ def create_app(config: Settings = settings) -> FastAPI:
     static = Path(__file__).parent / "static"
     if static.is_dir():
         application.mount("/static", StaticFiles(directory=static), name="static")
+    novnc = Path("/usr/share/novnc")
+    if novnc.is_dir():
+        application.mount("/novnc", StaticFiles(directory=novnc, html=True), name="novnc")
 
     @application.middleware("http")
     async def security_headers(request: Request, call_next: Any) -> Any:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), geolocation=(), payment=()"
         response.headers["Content-Security-Policy"] = (
@@ -1234,6 +1237,43 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.get("/api/desktop/actions")
     async def desktop_actions() -> list[dict[str, object]]:
         return store.list_desktop_actions()
+
+    @application.websocket("/api/desktop/vnc")
+    async def desktop_vnc(websocket: WebSocket) -> None:
+        """Bridge local-only VNC to the same-origin noVNC client."""
+        await websocket.accept()
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", 5901)
+        except OSError:
+            await websocket.close(code=1013, reason="local desktop unavailable")
+            return
+
+        async def browser_to_vnc() -> None:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    return
+                payload = message.get("bytes")
+                if payload is None and message.get("text") is not None:
+                    payload = message["text"].encode("latin-1")
+                if payload:
+                    writer.write(payload)
+                    await writer.drain()
+
+        async def vnc_to_browser() -> None:
+            while data := await reader.read(65536):
+                await websocket.send_bytes(data)
+
+        tasks = [asyncio.create_task(browser_to_vnc()), asyncio.create_task(vnc_to_browser())]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            for task in tasks:
+                task.cancel()
+            writer.close()
+            await writer.wait_closed()
 
     @application.get("/api/events")
     async def events() -> StreamingResponse:

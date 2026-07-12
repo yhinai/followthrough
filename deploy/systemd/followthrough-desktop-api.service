@@ -1,0 +1,17 @@
+[Unit]
+Description=Followthrough local desktop control API
+After=followthrough-desktop-session.service
+Requires=followthrough-desktop-session.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alhinai/Projects/followthrough
+Environment=DISPLAY=:99
+EnvironmentFile=-/home/alhinai/.config/followthrough/secrets.env
+ExecStart=/home/alhinai/Projects/followthrough/.venv/bin/uvicorn followthrough.local_desktop_api:app --host 127.0.0.1 --port 8080 --no-access-log
+Restart=always
+RestartSec=2
+TimeoutStopSec=5
+
+[Install]
+WantedBy=default.target

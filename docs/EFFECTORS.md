@@ -92,3 +92,18 @@ If it did happen, supply a mode `0600` provider receipt and add `--applied --rec
 - Purchase credentials are not present in this repository. Sandbox mode is the only installed purchase driver.
 
 The focused suite is `tests/test_effectors.py`. It covers duplicate suppression and rollback across all six types, authentication expiry, rate limiting, partial/uncertain writes, manual reconciliation, daily spend caps, append-only history, and connector-specific request construction.
+
+## Self-hosted desktop plane (free)
+
+`scripts/followthrough-desktop-api.py` serves the local desktop contract
+(`/health`, `/screenshot`, `click/type/key/scroll/drag`) against an Xvfb display
+driven by xdotool, so no paid remote desktop provider is required. Two user
+units run it:
+
+- `followthrough-xdesktop.service` — Xvfb `:99` at 1280x800, openbox, and the
+  demo apps (gedit + xterm).
+- `followthrough-desktop-api.service` — the loopback control plane on `:8080`,
+  authenticated with `ORGO_DESKTOP_API_TOKEN` from the private secrets file.
+
+`DesktopRouter` prefers this local plane whenever it is healthy, so the live
+viewer on the dashboard works with no external spend.

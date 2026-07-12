@@ -281,8 +281,6 @@ class DesktopRouter:
         if operation in {"stop", "restart"} and not confirmed:
             raise ValueError(f"{operation} requires confirmed=true")
         target = await self.target(computer_id)
-        if target.provider != "orgo-remote" or not target.computer_id:
-            raise ValueError("lifecycle operations require a remote Orgo computer")
         action = "ensure-running" if operation == "ensure_running" else operation
         result = await self._request(target, "POST", action)
         receipt = {
