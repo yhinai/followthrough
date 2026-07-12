@@ -88,6 +88,10 @@ def operational_entity(text: str, category: str) -> str:
     clean = _FILLER.sub("", clean)
     for pattern in _CREDENTIAL_PATTERNS:
         clean = pattern.sub("[redacted credential]", clean)
+    if category == "web_task":
+        clean = re.sub(r"(?i)^followthrough\s*[,;:-]?\s*", "", clean).strip()
+        clean = re.split(r"(?<=[.!?])\s+", clean, maxsplit=1)[0].rstrip(".!?")
+        return clean[:180] or _BOUNDED_DEFAULT[category]
     marker = _ACTION_MARKERS[category].search(clean)
     if marker and marker.group(1).strip():
         return marker.group(1).strip()[:180]

@@ -66,3 +66,12 @@ def test_start_url_lands_the_agent_on_the_named_site() -> None:
     )
     # No named site: let the agent decide where to begin.
     assert start_url("Book the cheapest flight to Tokyo") is None
+
+
+def test_web_task_keeps_the_full_price_command_not_best_buy_verb_collision() -> None:
+    from followthrough.integrations import operational_entity
+
+    assert operational_entity(
+        "Followthrough, check the current RTX 5080 price on Best Buy and tell me when you're done.",
+        "web_task",
+    ) == "check the current RTX 5080 price on Best Buy and tell me when you're done"

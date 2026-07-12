@@ -255,12 +255,28 @@ function renderAgent(sessions) {
     </li>`).join(""));
 }
 
+function renderJourney(activity, sessions, jobs) {
+  const session = sessions[0];
+  const signal = session ? activity.find((item) => item.event_id === session.source_event_id) : activity.find((item) => item.relevant);
+  const job = session ? jobs.find((item) => item.event_id === session.source_event_id) : null;
+  const browsing = session && AGENT_LIVE.has(session.state);
+  const verified = session?.state === "completed" && Boolean(session.latest_answer);
+  const returned = verified && job?.last_polled_at && new Date(job.last_polled_at) >= new Date(session.finished_at || session.updated_at);
+  [Boolean(signal), Boolean(signal?.relevant), Boolean(session), Boolean(browsing || verified), Boolean(verified), Boolean(returned)].forEach((done, index) => document.querySelectorAll("#journeyStages li")[index]?.classList.toggle("done", done));
+  $("#journeyHeard").textContent = signal ? `Heard: “${String(signal.text).slice(0, 88)}”` : "Listening for the demo phrase…";
+  $("#journeyDecision").textContent = signal?.relevant ? "Relevant signal detected · Web task created" : "Mention it, put your phone away, and Followthrough handles it.";
+  if (session?.created_at) { const end = session.finished_at || session.updated_at; const seconds = Math.max(0, Math.round((new Date(end) - new Date(session.created_at)) / 1000)); $("#journeyElapsed").textContent = verified ? `Completed in ${seconds}s` : `Working for ${seconds}s`; }
+  $("#journeyPhone").textContent = returned ? "Returned to Samsung Flip · playback ready" : verified ? "Result ready · awaiting phone poll" : "Runs quietly in the background";
+}
+
 async function load() {
   try {
-    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions] = await Promise.all([
-      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions"), jsonApi("/api/computer-use")
+    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions, journey] = await Promise.all([
+      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions"), jsonApi("/api/computer-use"), jsonApi("/api/journey")
     ]);
     renderAgent(agentSessions);
+    renderJourney(journey);
+    renderJourney(activity, agentSessions, jobs);
     const mode = controls.global.mode;
     const healthy = metrics.orchestrator?.status === "ok";
     const systemState = $("#systemState");

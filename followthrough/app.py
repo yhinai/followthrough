@@ -1171,6 +1171,48 @@ def create_app(config: Settings = settings) -> FastAPI:
     async def computer_use_sessions() -> list[dict[str, object]]:
         return store.list_computer_sessions()
 
+    @application.get("/api/journey")
+    async def journey() -> dict[str, object]:
+        """One run, end to end: what was heard, judged, delegated, browsed, returned.
+
+        The dashboard renders this as a single timeline so the whole system is
+        legible at a glance instead of scattered across four panels.
+        """
+        job = store.latest_dispatched_job()
+        if not job:
+            return {"present": False}
+        archived = archive_store.by_event(job["event_id"])
+        heard = ""
+        relevance: dict[str, object] = {}
+        if archived:
+            heard = bytes(archived["transcript_bytes"]).decode(errors="replace")
+            relevance = (json.loads(archived["metadata_json"]) or {}).get("relevance") or {}
+        session = store.computer_session_for_event(job["event_id"])
+        run = store.get_run(job["run_id"])
+        answer = None
+        if session and session.get("state") == "completed":
+            answer = session.get("latest_answer")
+        answer = answer or (run or {}).get("summary") or job.get("latest_outcome")
+        return {
+            "present": True,
+            "job_id": job["id"],
+            "event_id": job["event_id"],
+            "device_id": (archived or {}).get("device_id"),
+            "heard": heard,
+            "occurred_at": (archived or {}).get("received_at"),
+            "relevance": {
+                "category": job.get("category"),
+                "confidence": relevance.get("confidence"),
+                "reason": relevance.get("reason_code"),
+            },
+            "entity": job.get("entity"),
+            "job_state": job["state"],
+            "job_created_at": job["created_at"],
+            "agent": session,
+            "answer": answer,
+            "delivered_at": job.get("last_polled_at"),
+        }
+
     @application.get("/api/computer-use/{identifier}/frame")
     async def computer_use_frame(identifier: str) -> Response:
         """Stream the agent's own browser screenshot.

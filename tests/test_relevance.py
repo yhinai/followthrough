@@ -281,3 +281,10 @@ def test_spoken_web_command_is_classified_as_web_task():
     )
     assert result.primary_category == Category.WEB_TASK
     assert result.dispatch_allowed is True
+
+    price = evaluate_relevance(
+        "Followthrough, check the current RTX 5080 price on Best Buy and tell me when you're done.",
+        SpeakerContext.native_owner("owner-device"),
+    )
+    assert price.primary_category == Category.WEB_TASK
+    assert price.dispatch_allowed is True
