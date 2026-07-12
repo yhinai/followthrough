@@ -1,5 +1,7 @@
 # Encrypted backup and staged restore
 
+Android pending job IDs live in each phone's private app preferences. Spark remains authoritative for archive, run, job, result, and audit state.
+
 Followthrough backups preserve the three durable ledgers and the opaque runtime artifacts needed
 for recovery:
 

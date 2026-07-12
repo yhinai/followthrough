@@ -1,6 +1,6 @@
 # Memo Android sensor
 
-Memo is the primary phone sensor for Followthrough. Omi and the Termux uploader are no longer part of the active runtime path.
+Memo is the primary phone sensor for Followthrough. Omi and the Termux uploader are no longer part of the active runtime path. Memo now provides the complete two-way loop: audio/transcript upload, durable job receipt, restart-safe status polling, and spoken Hermes results through the built-in phone speaker. Samsung SM-F776U1 and OnePlus CPH2513 have both been verified; see [CURRENT_STATE.md](CURRENT_STATE.md).
 
 ## Runtime path
 
@@ -11,7 +11,9 @@ Samsung Flip microphone
   -> https://followthrough.alhinai.dev
   -> encrypted archive
   -> relevance gate
-  -> relevant-only Hermes job and Discord result
+  -> relevant-only Hermes job
+  -> authenticated status/result polling
+  -> phone loudspeaker response (plus Discord when enabled)
 ```
 
 ## Source and build

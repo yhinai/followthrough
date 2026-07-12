@@ -1,5 +1,7 @@
 # Four-minute demo
 
+The live demo should finish on the phone: show the durable job transition and Memo speaking the Hermes summary through the built-in loudspeaker. Current setup details are in [CURRENT_STATE.md](CURRENT_STATE.md).
+
 ## Context — 20 seconds
 
 “Founders do not lose opportunities because they lack conversations. They lose them because follow-through disappears by the time they leave the room. Followthrough is an ambient BizDev agency powered by Hermes: it turns a consented conversation into researched, traceable next actions.”

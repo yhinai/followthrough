@@ -1,6 +1,6 @@
 # Followthrough production implementation plan
 
-The product is an always-listening personal operating system. Omi or a phone microphone captures audio, Spark keeps the complete private archive, and only relevant segments cross into operational Hermes memory or actions.
+The product is an always-listening personal operating system. Memo Android captures audio, Spark keeps the complete private archive, and only relevant segments cross into operational Hermes memory or actions. Omi remains an inactive compatibility path. Phases 0-6 and the two-way channel are implemented; Phase 7 remains open for the uninterrupted soak and one no-repair physical run. See [CURRENT_STATE.md](CURRENT_STATE.md).
 
 Every phase has a hard gate. A phase is complete only after its deterministic tests, security checks, recovery test, and documented live proof pass.
 
@@ -19,13 +19,13 @@ Gate:
 - Public unauthenticated calls cannot read transcripts, runs, reports, metrics, audio, or events.
 - Hermes, Discord, Followthrough, and Cloudflare health checks pass.
 
-## Phase 1 — reliable Omi and audio ingestion
+## Phase 1 — reliable Memo and compatibility ingestion
 
 Deliverables:
 
 - Device bearer authentication with independently revocable tokens.
 - Idempotent transcript event ingestion using stable event IDs.
-- Omi payload normalization plus a stable native Followthrough ingestion contract.
+- Memo native ingestion plus retained Omi payload normalization for rollback compatibility.
 - Chunked audio upload with sequence numbers, digest verification, and retry-safe writes.
 - AES-256-GCM encryption at rest for transcripts and audio.
 - Archive metadata, device/source attribution, timestamps, and integrity digests.
@@ -117,7 +117,7 @@ Gate:
 
 Deliverables:
 
-- Omi/phone to Cloudflare to Spark to archive to relevance to Hermes to action to Discord proof.
+- Memo/phone to Cloudflare to Spark to archive to relevance to Hermes to action to authenticated phone result proof, with optional Discord reporting.
 - Load, long-duration, restart, network-loss, disk-pressure, corruption, backup, restore, and disaster-recovery tests.
 - Operator handbook, data export/deletion, credential rotation, and incident response.
 

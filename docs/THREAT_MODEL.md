@@ -1,5 +1,7 @@
 # Threat model and autonomy boundary
 
+Current transport is Memo Android, with Omi retained only as an inactive compatibility path. Device job reads are bound to a server-derived credential principal, so another valid device token cannot read a different phone's result. See [CURRENT_STATE.md](CURRENT_STATE.md).
+
 ## Assets
 
 - Complete audio and transcript archive.

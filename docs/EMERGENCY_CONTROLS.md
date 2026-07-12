@@ -1,5 +1,7 @@
 # Emergency controls
 
+Stopping Memo's foreground service is the device-local microphone kill path. The two-way job endpoint is read-only and exposes sanitized results only.
+
 Followthrough's emergency boundary is stored in `data/followthrough.db`. It is
 not a Hermes prompt and a worker cannot clear it. Every change requires the
 dashboard bearer token, produces a hash-chained audit receipt, and survives

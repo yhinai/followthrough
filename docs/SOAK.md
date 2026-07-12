@@ -1,5 +1,7 @@
 # Phase 7 acceptance and soak monitor
 
+The current final run monitors the deployed two-way Memo build. An intentional service restart invalidates that run; archive its ledger and begin a fresh run only after public health stabilizes. See [CURRENT_STATE.md](CURRENT_STATE.md).
+
 `scripts/followthrough-soak.py` is a read-only acceptance monitor for a live
 Followthrough installation. It writes one mode-0600, hash-chained JSONL receipt
 file. Each run appends a `run_start`, one or more `checkpoint` records, and a

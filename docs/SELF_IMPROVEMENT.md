@@ -1,5 +1,7 @@
 # Bounded self-improvement
 
+The phone return channel does not grant Hermes permission to rewrite Memo or promote changes. Code and policy promotion continue to use the staged gates below.
+
 Self-improvement is candidate-first. Mining, reflection, or Hermes may propose
 an artifact, but no proposal edits `~/.hermes/skills`, a live prompt, a control,
 or an evaluator. Candidates and reports are owner-only files under
@@ -65,4 +67,3 @@ promotion and invokes all owner-policy checks. Promotion consumes the
 - No candidate can add cron jobs, MCP servers, credentials, or auto-approval.
 - No Hermes skill is silently installed or reloaded.
 - No live target is inferred from the candidate.
-

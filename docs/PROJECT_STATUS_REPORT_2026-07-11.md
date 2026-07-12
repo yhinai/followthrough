@@ -1,5 +1,7 @@
 # Followthrough — extensive implementation and status report
 
+> **Superseding update — 2026-07-11 PDT:** Memo has replaced Omi as the active sensor. Samsung SM-F776U1 and OnePlus CPH2513 capture/delivery and loudspeaker routing are verified. The system now has an authenticated two-way result channel with restart-safe Android polling and Hermes summary return. Statements below about a closed Samsung ADB port, active Omi/Termux capture, or a missing physical Memo proof describe an earlier snapshot. [CURRENT_STATE.md](CURRENT_STATE.md) is authoritative. The 24-hour acceptance gate remains pending.
+
 **Report date:** July 11, 2026, America/Los_Angeles  
 **Repository:** `yhinai/followthrough`  
 **Live application:** <https://followthrough.alhinai.dev/>  

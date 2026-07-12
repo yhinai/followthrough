@@ -1,5 +1,7 @@
 # Followthrough — submission copy
 
+Current shipped loop: Memo Android -> Cloudflare -> Spark/Followthrough -> Hermes -> authenticated Memo result spoken on the phone, with optional Discord reporting. See [CURRENT_STATE.md](CURRENT_STATE.md).
+
 ## Track
 
 AI as Agency. Confirm this matches the organizer's locked registration record before submitting.

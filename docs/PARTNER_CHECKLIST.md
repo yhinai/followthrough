@@ -1,5 +1,7 @@
 # Partner power-up checklist
 
+Current shipped surface: Memo Android -> Cloudflare -> Spark/Followthrough -> Hermes -> authenticated Memo result, with optional Discord reporting. See [CURRENT_STATE.md](CURRENT_STATE.md).
+
 Each item is worth 25 points only after a mentor sees real, load-bearing use.
 
 - [x] Cloudflare: public Followthrough URL is live through the existing tunnel. Show the live URL and Cloudflare dashboard.

@@ -1,6 +1,6 @@
-# Omi integration
+# Omi integration (inactive rollback path)
 
-Followthrough supports the current stock Omi developer webhooks and a richer native API for a future Omi fork or phone companion.
+Followthrough retains stock Omi compatibility, but Memo Android is the active sensor and owns the bidirectional result channel. Use this document only for rollback or compatibility testing; see [MEMO_SETUP.md](MEMO_SETUP.md) and [CURRENT_STATE.md](CURRENT_STATE.md) for the shipped path.
 
 ## Stock Omi webhooks
 

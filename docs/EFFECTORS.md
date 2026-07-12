@@ -1,5 +1,7 @@
 # Typed external effectors
 
+Memo's authenticated phone return channel is a read surface, not an unrestricted effector. External writes still pass through the typed policies and receipts below. See [CURRENT_STATE.md](CURRENT_STATE.md).
+
 Followthrough never gives a transcript, web page, repository, or Hermes card arbitrary shell access to an external account. An accepted action must first become one of six validated request types:
 
 | Type | Current driver | Native idempotency / retry boundary | Rollback |
