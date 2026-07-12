@@ -977,6 +977,12 @@ def create_app(config: Settings = settings) -> FastAPI:
         store.mark_job_polled(job["id"])
         run = store.get_run(job["run_id"])
         summary = (run or {}).get("summary") or job.get("latest_outcome")
+        # A web task is executed by the computer-use agent, not by the research
+        # worker. Its answer is the ground truth for this job, so it wins over a
+        # worker summary that could only guess at the live page.
+        session = store.computer_session_for_event(job["event_id"])
+        if session and session.get("state") == "completed" and session.get("latest_answer"):
+            summary = session["latest_answer"]
         return {
             "job_id": job["id"],
             "run_id": job["run_id"],
@@ -986,6 +992,16 @@ def create_app(config: Settings = settings) -> FastAPI:
             "entity": job.get("entity"),
             "summary": summary,
             "error": job.get("last_error"),
+            "computer_use": (
+                {
+                    "id": session["id"],
+                    "state": session["state"],
+                    "steps": session.get("step_count"),
+                    "agent_view_url": session.get("agent_view_url"),
+                }
+                if session
+                else None
+            ),
             "updated_at": job["updated_at"],
         }
 

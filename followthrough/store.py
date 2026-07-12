@@ -161,6 +161,13 @@ class Store:
         ).fetchone()
         return dict(row) if row else None
 
+    def computer_session_for_event(self, event_id: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT * FROM computer_use_sessions WHERE source_event_id=? ORDER BY created_at DESC LIMIT 1",
+            (event_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def list_computer_sessions(self, limit: int = 30) -> list[dict[str, Any]]:
         return [
             dict(row)
