@@ -30,3 +30,18 @@ def test_non_actionable_generic_text_is_not_promoted() -> None:
     assert operational_entity("We discussed ordinary lunch plans", "ordinary_life") == (
         "the identified opportunity"
     )
+
+
+def test_bare_owner_repo_and_quoted_names_are_extracted() -> None:
+    assert operational_entity("please evaluate pypa/sampleproject soon", "repository") == "pypa/sampleproject"
+    assert operational_entity('someone mentioned "LangGraph Studio" earlier', "tool") == "LangGraph Studio"
+
+
+def test_contact_keeps_bounded_clause_and_strips_filler() -> None:
+    text = "Um, okay, follow up with Jordan about the invoice. Then unrelated chatter."
+    assert operational_entity(text, "contact") == "Jordan about the invoice"
+
+
+def test_contact_without_marker_never_copies_raw_ambient_text() -> None:
+    raw = "Um if I run out of message you say"
+    assert operational_entity(raw, "contact") == "Follow up on the captured contact"

@@ -12,9 +12,49 @@ def entity(text: str) -> str:
     url = re.search(r"https?://[^\s]+", text)
     if url:
         return url.group(0).rstrip(".,)")
-    found = re.search(r"(?:from|at|about|for)\s+([A-Z][\w.-]+(?:\s+[A-Z][\w.-]+)?)", text)
+    repo = re.search(r"\b([A-Za-z][\w.-]*/[A-Za-z][\w.-]+)\b", text)
+    if repo:
+        return repo.group(1)
+    quoted = re.search(r"[\"“'‘]([A-Za-z][\w .-]{2,50})[\"”'’]", text)
+    if quoted:
+        return quoted.group(1).strip()
+    found = re.search(
+        r"(?:from|at|about|for|called|named|using|try(?:\s+out)?)\s+([A-Z][\w.-]+(?:\s+[A-Z][\w.-]+)?)",
+        text,
+    )
     return found.group(1) if found else "the identified opportunity"
 
+
+_FILLER = re.compile(r"^(?:\s*(?:um+|uh+|so|like|okay|ok|well|you know|yeah|hey)[,\s]+)+", re.I)
+
+_ACTION_MARKERS = {
+    "todo": re.compile(
+        r"(?i)\b(?:remind\s+me(?:\s+to)?|to[- ]?do|action\s+item|"
+        r"(?:i|we)\s+(?:need|have|must)\s+to)\b[:\s-]*([^.!?\n]{1,180})"
+    ),
+    "contact": re.compile(
+        # The clause must name a target (proper noun or the/my/our ...) so a
+        # bare verb collision like "message you say" is not promoted.
+        r"\b(?i:call|text|message|email|ping|reach\s+out\s+to|follow\s+up\s+with|"
+        r"contact|talk\s+to|meet\s+with|introduce\s+me\s+to)\b[:\s-]*"
+        r"((?:[A-Z]|(?i:the|my|our)\s)[^.!?\n]{1,179})"
+    ),
+    "event": re.compile(
+        r"(?i)\b(?:schedule|meeting\s+(?:with|about)|calendar|appointment\s+(?:with|for)|"
+        r"rsvp\s+(?:to|for)|attend(?:ing)?)\b[:\s-]*([^.!?\n]{1,180})"
+    ),
+    "goal": re.compile(
+        r"(?i)\b(?:goal\s+is(?:\s+to)?|plan(?:ning)?\s+to|aim(?:ing)?\s+to|want\s+to|"
+        r"objective\s+is(?:\s+to)?)\b[:\s-]*([^.!?\n]{1,180})"
+    ),
+}
+
+_BOUNDED_DEFAULT = {
+    "todo": "Review and complete the captured commitment",
+    "contact": "Follow up on the captured contact",
+    "event": "Prepare for the captured event",
+    "goal": "Advance the captured goal",
+}
 
 _CREDENTIAL_PATTERNS = (
     re.compile(
@@ -42,21 +82,15 @@ def operational_entity(text: str, category: str) -> str:
     if category not in {"todo", "event", "contact", "goal"}:
         return named
     clean = " ".join(text.split())
+    clean = _FILLER.sub("", clean)
     for pattern in _CREDENTIAL_PATTERNS:
         clean = pattern.sub("[redacted credential]", clean)
-    if category == "todo":
-        marker = re.search(
-            r"(?i)\b(?:remind\s+me(?:\s+to)?|to[- ]?do|action\s+item|"
-            r"(?:i|we)\s+(?:need|have|must)\s+to)\b[:\s-]*([^.!?\n]{1,180})",
-            clean,
-        )
-        if marker and marker.group(1).strip():
-            clean = marker.group(1).strip()
-        else:
-            # A relevant TODO without a bounded action clause stays useful but
-            # must not leak the surrounding conversation into operational memory.
-            clean = "Review and complete the captured commitment"
-    return clean[:180] or named
+    marker = _ACTION_MARKERS[category].search(clean)
+    if marker and marker.group(1).strip():
+        return marker.group(1).strip()[:180]
+    # A relevant signal without a bounded action clause stays useful but must
+    # not leak the surrounding conversation into operational memory.
+    return _BOUNDED_DEFAULT[category]
 
 
 def linkup(text: str, api_key: str) -> dict[str, Any]:

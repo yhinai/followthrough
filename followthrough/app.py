@@ -1014,6 +1014,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         job = store.hermes_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="job not found")
+        store.mark_job_polled(job["id"])
         run = store.get_run(job["run_id"])
         summary = (run or {}).get("summary") or job.get("latest_outcome")
         return {

@@ -83,7 +83,7 @@ class Store:
               notification_state TEXT NOT NULL DEFAULT 'pending',
               notification_json TEXT,
               hermes_status TEXT, latest_outcome TEXT, diagnostics_json TEXT NOT NULL DEFAULT '[]',
-              last_error TEXT, last_sync_at TEXT,
+              last_error TEXT, last_sync_at TEXT, last_polled_at TEXT,
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS service_heartbeats (
@@ -107,6 +107,7 @@ class Store:
         self._ensure_column("hermes_jobs", "latest_outcome", "TEXT")
         self._ensure_column("hermes_jobs", "diagnostics_json", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column("hermes_jobs", "notification_attempts", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("hermes_jobs", "last_polled_at", "TEXT")
         self.db.commit()
 
     def _ensure_column(self, table: str, column: str, declaration: str) -> None:
@@ -232,6 +233,11 @@ class Store:
     def hermes_job(self, job_id: str) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM hermes_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None
+
+    def mark_job_polled(self, job_id: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE hermes_jobs SET last_polled_at=? WHERE id=?", (now(), job_id))
+            self.db.commit()
 
     def hermes_job_for_run(self, run_id: str) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
