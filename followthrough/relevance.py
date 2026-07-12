@@ -395,8 +395,11 @@ _RULES: tuple[_Rule, ...] = (
         "contact.outreach",
         Category.CONTACT,
         _rx(
-            r"\b(?:follow[ -]?up\s+with|reach\s+out\s+to|email|dm|message|contact|"
-            r"call)\s+(?:the\s+)?[\w@]"
+            r"\b(?:follow[ -]?up\s+with|reach\s+out\s+to|"
+            r"send\s+(?:an?\s+)?(?:email|dm|message)\s+to|"
+            r"(?:email|dm|message|contact|call)\s+"
+            r"(?!(?:and|or|is|was|were|the|a|an|about|from|does|has|address)\b)"
+            r"(?:the\s+)?[\w@])"
         ),
         0.93,
         "Recognized an outbound contact request",

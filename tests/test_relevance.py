@@ -246,6 +246,8 @@ HELD_OUT_CASES: tuple[tuple[str, SpeakerContext, bool], ...] = (
     ("Good morning, the dog is cute", NATIVE_OWNER, False),
     ("I am hungry and need to eat dinner", OMI_OWNER, False),
     ("Let's watch a movie tonight", NATIVE_OWNER, False),
+    ("I saw my email and then he replied", NATIVE_OWNER, False),
+    ("The email address was on the screen", NATIVE_OWNER, False),
     ("That GitHub repository looks useful", SpeakerContext.unknown(), False),
     ("Try this new CLI tool", SpeakerContext.omi(is_user=None), False),
     ("Optimize the agent throughput", SpeakerContext.omi(is_user=False), False),
