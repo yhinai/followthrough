@@ -226,6 +226,17 @@ function renderAgent(sessions) {
     replay.hidden = true;
   }
 
+  const screen = $("#agentScreen");
+  const frame = $("#agentFrame");
+  if (session.latest_frame_url) {
+    // Cache-bust on the step counter so each new step repaints the frame.
+    const next = `/api/computer-use/${encodeURIComponent(session.id)}/frame?step=${steps}`;
+    if (frame.getAttribute("src") !== next) frame.setAttribute("src", next);
+    screen.hidden = false;
+  } else {
+    screen.hidden = true;
+  }
+
   const answer = $("#agentAnswer");
   if (session.state === "completed" && session.latest_answer) {
     answer.hidden = false;

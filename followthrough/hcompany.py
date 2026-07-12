@@ -36,6 +36,17 @@ def _step_count(payload: dict[str, Any], fallback: int) -> int:
     return fallback
 
 
+def _frame_url(events: list[Any]) -> str | None:
+    """The agent streams a screenshot of its browser with most steps."""
+    for event in reversed(events):
+        if not isinstance(event, dict):
+            continue
+        image = (event.get("data") or {}).get("image")
+        if isinstance(image, dict) and image.get("type") == "url" and image.get("source"):
+            return str(image["source"])
+    return None
+
+
 def _event_summary(event: Any) -> str:
     if not isinstance(event, dict):
         return str(event)[:500]
@@ -150,13 +161,16 @@ class HCompanyExecutor:
                     state = _status(payload.get("status", "running"))
                     current = _event_summary(events[-1]) if events else f"Session {state}"
                     answer = payload.get("answer")
-                    row = self.store.update_computer_session(
-                        identifier,
-                        state=state,
-                        step_count=step_count,
-                        current_action=current,
-                        latest_answer=answer if isinstance(answer, str) else None,
-                    )
+                    updates: dict[str, Any] = {
+                        "state": state,
+                        "step_count": step_count,
+                        "current_action": current,
+                        "latest_answer": answer if isinstance(answer, str) else None,
+                    }
+                    frame = _frame_url(events)
+                    if frame:
+                        updates["latest_frame_url"] = frame
+                    row = self.store.update_computer_session(identifier, **updates)
                     await self.publish("computer_use_progress", row)
                     if state in TERMINAL_STATES:
                         break

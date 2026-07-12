@@ -122,6 +122,7 @@ class Store:
         self._ensure_column("hermes_jobs", "diagnostics_json", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column("hermes_jobs", "notification_attempts", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("hermes_jobs", "last_polled_at", "TEXT")
+        self._ensure_column("computer_use_sessions", "latest_frame_url", "TEXT")
         self.db.commit()
 
     def create_computer_session(
@@ -140,7 +141,7 @@ class Store:
     def update_computer_session(self, identifier: str, **values: Any) -> dict[str, Any]:
         allowed = {
             "h_session_id", "state", "step_count", "current_action", "latest_answer",
-            "agent_view_url", "error", "finished_at",
+            "agent_view_url", "error", "finished_at", "latest_frame_url",
         }
         changes = {key: value for key, value in values.items() if key in allowed}
         if changes:

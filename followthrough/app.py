@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1169,6 +1170,33 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.get("/api/computer-use")
     async def computer_use_sessions() -> list[dict[str, object]]:
         return store.list_computer_sessions()
+
+    @application.get("/api/computer-use/{identifier}/frame")
+    async def computer_use_frame(identifier: str) -> Response:
+        """Stream the agent's own browser screenshot.
+
+        H serves trajectory frames behind the API key, so the browser cannot
+        load them directly; proxy the latest one instead of leaking the key.
+        """
+        session = store.computer_session(identifier)
+        if not session or not session.get("latest_frame_url"):
+            raise HTTPException(status_code=404, detail="no agent frame yet")
+        source = str(session["latest_frame_url"])
+        if not source.startswith(config.h_api_base.split("/api/")[0]):
+            raise HTTPException(status_code=404, detail="no agent frame yet")
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+                response = await client.get(
+                    source, headers={"Authorization": f"Bearer {config.h_api_key.strip()}"}
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail="agent frame unavailable") from exc
+        return Response(
+            content=response.content,
+            media_type=response.headers.get("content-type", "image/png"),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @application.get("/api/computer-use/{identifier}")
     async def computer_use_session(identifier: str) -> dict[str, object]:
