@@ -51,10 +51,11 @@ RESEARCH_QUERY = re.compile(
 )
 CHECK_QUERY = re.compile(r"\bcheck\s+it\s+out\s+(?:for\s+|and\s+)?\S+", re.I)
 INCOMPLETE_COMMAND = re.compile(
-    r"(?:^|[.!?]\s*|\b(?:follow\s*through|memo)\s*[,;:\-]?\s*)"
-    r"(?:please\s+)?(?:research(?:\s+(?:the|a|an|this|that|my|our))?|"
+    r"^(?:(?:a\s+)?(?:follow\s*through|memo)\s*[,;:\-]?\s*)?"
+    r"(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+    r"(?:research(?:\s+(?:the|a|an|this|that|my|our))?|"
     r"perform\s+(?:a\s+)?web\s+search|search\s+(?:(?:the\s+)?(?:web|internet)|online)|"
-    r"check\s+it\s+out)\s*[.!?]*$",
+    r"search|check\s+it\s+out)\s*[.!?]*$",
     re.I,
 )
 
@@ -64,6 +65,7 @@ class Transcript:
     event_id: str
     occurred_at: str
     text: str
+    component_event_ids: tuple[str, ...] = ()
 
 
 class TranscriptAggregator:
@@ -126,6 +128,7 @@ class TranscriptAggregator:
             event_id=f"adb-omi:aggregate:{digest}",
             occurred_at=occurred_at,
             text=text,
+            component_event_ids=tuple(item.event_id for item in selected),
         )
 
 

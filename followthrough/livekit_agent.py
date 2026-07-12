@@ -26,7 +26,12 @@ from livekit.agents.llm import ChatContext, ChatMessage, StopResponse
 
 logger = logging.getLogger("followthrough.livekit")
 FINAL_DELIVERY_ATTEMPTS = 5
-FINAL_COALESCE_SECONDS = 1.5
+# Deepgram can emit adjacent final segments almost two seconds apart even when
+# the speaker never pauses (for example, "Memo, can you search" followed by
+# "the web and find ...").  Keep one short trailing window so those finals
+# become one archive event and one action instead of dispatching a fragment.
+FINAL_COALESCE_SECONDS = 3.0
+DEEPGRAM_ENDPOINTING_MS = 1200
 
 FOLLOWTHROUGH_API_URL = os.getenv(
     "FOLLOWTHROUGH_LIVEKIT_API_URL", "https://followthrough.alhinai.dev"
@@ -62,9 +67,7 @@ class FollowthroughVoiceAgent(Agent):
             ),
         )
 
-    async def on_user_turn_completed(
-        self, turn_ctx: ChatContext, new_message: ChatMessage
-    ) -> None:
+    async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: ChatMessage) -> None:
         del turn_ctx
         text = new_message.text_content or ""
         if MEMO_ACTIVATION.search(text):
@@ -203,7 +206,7 @@ class TranscriptBridge:
         text = " ".join(part for part, _ in pending)
         item_ids = [item_id for _, item_id in pending if item_id]
         utterance_id = (
-            f"memo-livekit-{uuid.uuid5(uuid.NAMESPACE_URL, f'{self.ctx.room.name}:{':'.join(item_ids)}')}"
+            f"memo-livekit-{uuid.uuid5(uuid.NAMESPACE_URL, f'{self.ctx.room.name}:{":".join(item_ids)}')}"
             if item_ids
             else self.utterance_id
         )
@@ -254,9 +257,7 @@ class TranscriptBridge:
     async def _return_result(self, job_id: str) -> None:
         for _ in range(360):
             await asyncio.sleep(2)
-            response = await self.client.get(
-                f"{FOLLOWTHROUGH_API_URL}/api/v1/jobs/{job_id}"
-            )
+            response = await self.client.get(f"{FOLLOWTHROUGH_API_URL}/api/v1/jobs/{job_id}")
             if response.status_code != 200:
                 continue
             result = response.json()
@@ -306,7 +307,15 @@ async def followthrough_session(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name, "surface": "memo-livekit"}
     await ctx.connect()
     session = AgentSession(
-        stt=inference.STT(model="deepgram/nova-3", language="multi"),
+        stt=inference.STT(
+            model="deepgram/nova-3",
+            language="multi",
+            # Deepgram's low default endpoint threshold can split a continuous
+            # sentence at tiny natural hesitations. Require a meaningful pause
+            # before emitting a final; the bridge then coalesces any remaining
+            # adjacent finals into a single archived utterance.
+            extra_kwargs={"endpointing": DEEPGRAM_ENDPOINTING_MS},
+        ),
         tts=inference.TTS(
             model="cartesia/sonic-3",
             voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",

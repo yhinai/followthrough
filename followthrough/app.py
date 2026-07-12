@@ -313,7 +313,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         else:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; "
-                "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+                "style-src 'self'; font-src 'self'; "
                 "connect-src 'self' https://cloudflareinsights.com wss://*.livekit.cloud; "
                 "img-src 'self' data:; media-src 'self' blob:; object-src 'none'; "
                 "base-uri 'none'; frame-ancestors 'none'"
@@ -466,10 +466,11 @@ def create_app(config: Settings = settings) -> FastAPI:
             kind = "owner_unverified"
         else:
             kind = relevance.reason_code
-        if waiting_for_context and not relevance.dispatch_allowed:
+        dispatch_allowed = relevance.dispatch_allowed and not waiting_for_context
+        if waiting_for_context:
             kind = "waiting_for_context"
         classification = Classification(
-            relevance.dispatch_allowed,
+            dispatch_allowed,
             kind,
             relevance.confidence,
             "waiting_for_context" if kind == "waiting_for_context" else relevance.reason_code,
@@ -482,7 +483,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             occurred_at=_utc(payload.occurred_at),
             transcript_bytes=transcript_bytes,
             transcript_sha256=archive.digest(transcript.encode()),
-            relevant=relevance.dispatch_allowed,
+            relevant=dispatch_allowed,
             classification=classification.kind,
             metadata={
                 **payload.metadata,
@@ -539,9 +540,10 @@ def create_app(config: Settings = settings) -> FastAPI:
                 "text": transcript,
                 # A segment folded into an aggregate is archived but never
                 # dispatched itself; the live event must not claim otherwise.
-                "relevant": relevance.dispatch_allowed and not suppress_dispatch,
+                "relevant": dispatch_allowed and not suppress_dispatch,
                 "classification": "aggregate_component" if suppress_dispatch else classification.kind,
                 "aggregated": bool(payload.metadata.get("aggregated")),
+                "component_event_ids": payload.metadata.get("component_event_ids", []),
                 "utterance_id": payload.metadata.get("utterance_id"),
             },
         )
@@ -569,7 +571,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 "operational_memory": False,
                 "dispatch_suppressed_for_aggregate": True,
             }
-        if not relevance.dispatch_allowed:
+        if not dispatch_allowed:
             await bus.publish(
                 "archive_only",
                 {"event_id": payload.event_id, "classification": classification.kind},
@@ -688,6 +690,13 @@ def create_app(config: Settings = settings) -> FastAPI:
         if not payload.consent:
             raise HTTPException(status_code=400, detail="capture consent flag is required")
         speaker = SpeakerContext.native_owner(payload.device_id)
+        if payload.metadata.get("aggregated"):
+            for component_event_id in payload.metadata.get("component_event_ids", []):
+                component = archive_store.by_event(str(component_event_id))
+                if component:
+                    archive_store.set_classification(
+                        component["id"], relevant=False, classification="aggregate_component"
+                    )
         aggregate = None
         aggregator = None
         already_archived = archive_store.by_event(payload.event_id) is not None
@@ -720,6 +729,15 @@ def create_app(config: Settings = settings) -> FastAPI:
             ),
         )
         if aggregate and aggregator:
+            # The complete utterance replaces its ASR-sized component rows in
+            # the user-facing transcript. The immutable component text stays
+            # in the archive, but it must never look like separate speech.
+            for component_event_id in aggregate.component_event_ids:
+                component = archive_store.by_event(component_event_id)
+                if component:
+                    archive_store.set_classification(
+                        component["id"], relevant=False, classification="aggregate_component"
+                    )
             aggregate_payload = TranscriptEventIn(
                 event_id=aggregate.event_id,
                 device_id=payload.device_id,
@@ -730,6 +748,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 metadata={
                     **payload.metadata,
                     "aggregated": True,
+                    "component_event_ids": list(aggregate.component_event_ids),
                     "aggregate_window_seconds": aggregator.window_seconds,
                 },
             )

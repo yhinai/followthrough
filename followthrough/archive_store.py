@@ -99,13 +99,13 @@ class ArchiveStore:
     ) -> list[dict[str, Any]]:
         """Spoken/typed events newest-first, keyset-paginated by received_at.
 
-        Synthetic aggregate events are excluded: their text duplicates the
-        component segments that are already in the list, so showing both would
-        render the same words twice in the transcript.
+        ASR component events remain in the complete archive, but the readable
+        feed shows the synthetic utterance that joins them. This prevents
+        transcription endpointing from looking like conversational pauses.
         """
         query = (
-            "SELECT * FROM archive_events WHERE classification != 'audio_only' "
-            "AND COALESCE(json_extract(metadata_json, '$.aggregated'), 0) != 1"
+            "SELECT * FROM archive_events WHERE classification NOT IN "
+            "('audio_only', 'aggregate_component')"
         )
         parameters: list[Any] = []
         if before and before_id:

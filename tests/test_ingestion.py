@@ -271,6 +271,44 @@ def test_incomplete_command_waits_then_combines_with_next_segment(configured_set
     assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
 
 
+def test_memo_activation_does_not_override_incomplete_utterance(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-chunk-search-0001",
+                "device_id": "memo-phone",
+                "text": "A memo, can you search",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+        assert first.json()["status"] == "waiting_for_context"
+        assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+        second = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-chunk-search-0002",
+                "device_id": "memo-phone",
+                "text": "the web and find caffeine in Red Bull?",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+        feed = client.get("/api/transcript").json()
+
+    assert second.json()["status"] == "queued"
+    assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+    assert len(feed) == 1
+    assert feed[0]["text"] == (
+        "A memo, can you search the web and find caffeine in Red Bull?"
+    )
+
+
 def test_email_request_reports_setup_needed_without_creating_work(configured_settings) -> None:
     settings, _, device_token = configured_settings
     app = create_app(settings)

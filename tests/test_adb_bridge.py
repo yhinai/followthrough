@@ -50,6 +50,7 @@ def test_incomplete_commands_wait_for_the_next_segment() -> None:
         ("perform a web search", "for the latest World Cup news"),
         ("Followthrough, research the", "latest World Cup schedule"),
         ("check it out", "for current RTX 5090 prices"),
+        ("A memo, can you search", "the web and find caffeine in Red Bull?"),
     ]
     for first_text, second_text in cases:
         aggregator = TranscriptAggregator(window_seconds=45)

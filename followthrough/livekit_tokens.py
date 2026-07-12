@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -30,9 +31,15 @@ def issue_memo_session_token(
     if not server_url or not api_key or not api_secret:
         raise RuntimeError("LiveKit is not configured")
 
-    suffix = hashlib.sha256(device_id.encode()).hexdigest()[:20]
+    # A room is one live capture session, not a permanent device mailbox.
+    # Reusing a deterministic room after a disconnect can leave the phone in a
+    # room whose previous agent dispatch already terminated, so no new STT job
+    # is attached. A fresh suffix makes every reconnect trigger exactly one new
+    # room-scoped agent dispatch while retaining the stable device prefix.
+    device_suffix = hashlib.sha256(device_id.encode()).hexdigest()[:12]
+    suffix = f"{device_suffix}-{secrets.token_hex(4)}"
     room_name = f"followthrough-{suffix}"
-    identity = f"{device_id}-{suffix[:8]}"
+    identity = f"{device_id}-{suffix}"
     metadata = json.dumps(
         {
             "surface": surface,

@@ -68,6 +68,22 @@ def test_partial_requires_consent(configured_settings) -> None:
     assert response.status_code == 400
 
 
+def test_partial_consent_omission_fails_closed(configured_settings) -> None:
+    settings, _, _ = configured_settings
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/transcripts/partial",
+            json={
+                "utterance_id": "utterance-no-consent-01",
+                "device_id": "memo-phone",
+                "text": "This must not stream.",
+                "source": "phone",
+            },
+        )
+    assert response.status_code == 400
+
+
 def test_partial_rejects_oversized_hypothesis(configured_settings) -> None:
     with _client(configured_settings) as client:
         response = client.post(
@@ -194,7 +210,9 @@ def test_transcript_feed_paginates_older_entries_with_before_cursor(configured_s
     assert [entry["event_id"] for entry in second_page] == ["transcript-page-0000"]
 
 
-def test_transcript_feed_excludes_synthetic_aggregates(configured_settings) -> None:
+def test_transcript_feed_replaces_asr_components_with_complete_utterance(
+    configured_settings,
+) -> None:
     with _client(configured_settings) as client:
         client.post(
             "/api/v1/transcripts",
@@ -214,11 +232,14 @@ def test_transcript_feed_excludes_synthetic_aggregates(configured_settings) -> N
                 "source": "api",
                 "text": "remember to check the oven",
                 "consent": True,
-                "metadata": {"aggregated": True},
+                "metadata": {
+                    "aggregated": True,
+                    "component_event_ids": ["transcript-component-0001"],
+                },
             },
         )
         feed = client.get("/api/transcript").json()
-    assert [entry["event_id"] for entry in feed] == ["transcript-component-0001"]
+    assert [entry["event_id"] for entry in feed] == ["adb-omi:aggregate:feedtest0001"]
 
 
 def test_transcript_feed_excludes_audio_only_events(configured_settings) -> None:
