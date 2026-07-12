@@ -271,8 +271,8 @@ function renderJourney(activity, sessions, jobs) {
 
 async function load() {
   try {
-    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions, journey] = await Promise.all([
-      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions"), jsonApi("/api/computer-use"), jsonApi("/api/journey")
+    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions] = await Promise.all([
+      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions"), jsonApi("/api/computer-use")
     ]);
     renderAgent(agentSessions);
     renderJourney(activity, agentSessions, jobs);

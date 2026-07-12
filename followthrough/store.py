@@ -341,12 +341,6 @@ class Store:
         row = self.db.execute("SELECT * FROM hermes_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None
 
-    def latest_dispatched_job(self) -> dict[str, Any] | None:
-        row = self.db.execute(
-            "SELECT * FROM hermes_jobs WHERE state != 'cancelled' ORDER BY created_at DESC LIMIT 1"
-        ).fetchone()
-        return dict(row) if row else None
-
     def mark_job_polled(self, job_id: str) -> None:
         with self.lock:
             self.db.execute("UPDATE hermes_jobs SET last_polled_at=? WHERE id=?", (now(), job_id))
