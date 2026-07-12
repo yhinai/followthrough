@@ -544,7 +544,7 @@ class Store:
             for row in self.db.execute("SELECT run_id,task_id,event_id FROM hermes_jobs WHERE task_id IS NOT NULL AND state IN ('enqueued','queued','in_progress','needs_attention') ORDER BY updated_at LIMIT ?", (limit,)).fetchall()
         ]
 
-    def kanban_record_reconciled(self, run_id: str, *, task_id: str, state: str, hermes_status: str, latest_outcome: str, diagnostics: list[str] | tuple[str, ...]) -> bool:
+    def kanban_record_reconciled(self, run_id: str, *, task_id: str, state: str, hermes_status: str, latest_outcome: str, diagnostics: list[str] | tuple[str, ...], summary: str | None = None) -> bool:
         timestamp = now()
         run_status = {
             "queued": "queued",
@@ -579,6 +579,8 @@ class Store:
                 self.db.rollback()
                 return False
             fields: dict[str, Any] = {"status": run_status}
+            if summary:
+                fields["summary"] = summary[:20_000]
             if state == "completed":
                 fields.update({"finished_at": timestamp, "success": 1})
             elif state in {"dead_letter", "cancelled"}:

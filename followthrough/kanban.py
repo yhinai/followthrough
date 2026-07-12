@@ -512,6 +512,15 @@ def _latest_outcome(runs: Sequence[Mapping[str, Any]] | None) -> str:
     return "unknown"
 
 
+def _latest_summary(runs: Sequence[Mapping[str, Any]] | None) -> str | None:
+    if not runs:
+        return None
+    summary = runs[-1].get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        return None
+    return summary.strip()[:20_000]
+
+
 def _diagnostic_codes(diagnostics: JsonValue | None) -> tuple[str, ...]:
     if diagnostics is None:
         return ()
@@ -623,6 +632,7 @@ class KanbanStore(Protocol):
         state: str,
         hermes_status: str,
         latest_outcome: str,
+        summary: str | None,
         diagnostics: Sequence[str],
     ) -> None: ...
 
@@ -839,6 +849,7 @@ class DurableOrchestrator:
                 diagnostics = self.client.diagnostics(task_id)
                 hermes_status = _safe_token(task.get("status", task.get("state", "unknown")))
                 latest_outcome = _latest_outcome(runs)
+                summary = _latest_summary(runs)
                 state = map_task_status(task, runs, diagnostics)
                 self.store.kanban_record_reconciled(
                     run_id,
@@ -846,6 +857,7 @@ class DurableOrchestrator:
                     state=state,
                     hermes_status=hermes_status,
                     latest_outcome=latest_outcome,
+                    summary=summary,
                     diagnostics=_diagnostic_codes(diagnostics),
                 )
                 result["reconciled"] = int(result["reconciled"]) + 1
