@@ -1,0 +1,25 @@
+name: Followthrough deployment verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: Public Followthrough URL to verify
+        required: true
+        default: https://followthrough.alhinai.dev/healthz
+
+permissions:
+  contents: read
+
+jobs:
+  verify-live-deployment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify public health endpoint
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 3 --max-time 15 "$TARGET_URL")"
+          python3 -c 'import json,sys; payload=json.loads(sys.argv[1]); assert payload["ok"] is True; assert payload["service"] == "followthrough"' "$response"
