@@ -30,7 +30,7 @@ def test_device_reads_sanitized_job_status_by_id(configured_settings) -> None:
         assert "acceptance_json" not in status.json()
         assert "capsule_path" not in status.json()
 
-        assert client.get(f"/api/v1/jobs/no-such-job").status_code == 404
+        assert client.get("/api/v1/jobs/no-such-job").status_code == 404
 
 
 def test_device_poll_stamps_last_polled_at(configured_settings) -> None:

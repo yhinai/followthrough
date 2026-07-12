@@ -121,10 +121,34 @@ function renderCurrentJob(jobs, activity) {
   setHTML("#currentJob", `<div class="focus-symbol">H</div><span class="focus-state">${active.length ? "Hermes is working" : "Latest completed work"}</span><strong>${escapeHtml(job.entity || "Identified signal")}</strong><p>${escapeHtml(label(job.hermes_status || job.state))}</p><div class="progress-track"><i></i></div><small>${job.task_id ? `Receipt ${escapeHtml(job.task_id)}` : "Creating durable receipt…"}</small>`);
 }
 
+function renderDesktop(doctor, actions) {
+  const state = $("#desktopState");
+  const frame = $("#desktopFrame");
+  const empty = $("#desktopEmpty");
+  state.className = `desktop-state ${doctor.ready ? "online" : "offline"}`;
+  state.innerHTML = `<i></i>${doctor.ready ? "Live" : "Not configured"}`;
+  $("#desktopProvider").textContent = doctor.provider || doctor.prefer || "Unavailable";
+  $("#desktopComputer").textContent = doctor.computer_id ? doctor.computer_id.slice(0, 12) : (doctor.provider === "orgo-local" ? "This computer" : "—");
+  $("#desktopRoute").textContent = doctor.ready ? `${label(doctor.provider)} · automatic` : "Automatic routing";
+  const shot = doctor.screenshot || {};
+  $("#desktopResolution").textContent = shot.width ? `${shot.width} × ${shot.height}` : "—";
+  if (doctor.ready) {
+    frame.hidden = false; empty.hidden = true;
+    frame.src = `/api/desktop/screenshot?t=${Date.now()}`;
+  } else {
+    frame.hidden = true; empty.hidden = false;
+  }
+  const action = actions[0];
+  $("#desktopAction").textContent = action ? label(action.action) : "No desktop action yet";
+  $("#desktopVerification").textContent = action
+    ? (action.noop === 1 ? "No visual change detected — the agent must re-plan." : action.visual_changed === 1 ? "Visual change verified from frame fingerprints." : "Action recorded without visual verification.")
+    : "Before/after visual fingerprints will appear here.";
+}
+
 async function load() {
   try {
-    const [metrics, jobs, controls, memories, activity] = await Promise.all([
-      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity")
+    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions] = await Promise.all([
+      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions")
     ]);
     const mode = controls.global.mode;
     const healthy = metrics.orchestrator?.status === "ok";
@@ -147,6 +171,7 @@ async function load() {
     setHTML("#jobs", jobs.length ? jobs.slice(0,12).map(jobRow).join("") : '<div class="empty-state compact"><strong>No delegated work yet</strong><small>Qualified signals will become traceable work here.</small></div>');
     $("#jobSummary").textContent = `Live · ${jobs.filter((job) => job.state === "completed").length} completed · ${jobs.filter((job) => !["completed","cancelled","dead_letter","failed"].includes(job.state)).length} active`;
     renderCurrentJob(jobs, activity);
+    renderDesktop(desktopDoctor, desktopActions);
     $("#memoryCount").textContent = `Live · ${memories.length} items`;
     setHTML("#memories", memories.length ? memories.slice(0,7).map(memoryCard).join("") : '<div class="empty-state compact"><strong>No memory promoted</strong><small>Important entities and preferences will appear here.</small></div>');
     refreshTimes();
@@ -160,6 +185,7 @@ $("#sample").onclick = () => { $("#input").value = "Research and safely evaluate
 $("#submit").onclick = () => sendSignal($("#input").value);
 $("#listen").onclick = () => setBrowserMic(!browserListening);
 $("#pause").onclick = () => setMode(document.body.dataset.mode === "running" ? "paused" : "running", true);
+$("#refreshDesktop").onclick = () => load();
 $("#feedFilter").onclick = () => {
   actionableOnly = !actionableOnly;
   $("#feedFilter").setAttribute("aria-pressed", String(actionableOnly));
@@ -181,3 +207,7 @@ document.addEventListener("keydown", (event) => {
 });
 load();
 setInterval(load, 1500);
+const liveEvents = new EventSource("/api/events");
+liveEvents.addEventListener("desktop_action", () => load());
+liveEvents.addEventListener("computer_use_progress", () => load());
+liveEvents.addEventListener("computer_use_completed", () => load());

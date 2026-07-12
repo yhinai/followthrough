@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f5ef">
   <title>Followthrough · Ambient operator</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-3">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-4">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -25,9 +25,9 @@
       <div class="hero-copy">
         <p class="eyebrow"><span></span>Consent-first ambient intelligence</p>
         <h1>Turn conversation<br>into <em>momentum.</em></h1>
-        <p class="lede">Followthrough notices what matters, briefs Hermes, and carries the work forward—while everything else disappears.</p>
+        <p class="lede">Followthrough notices what matters, briefs Hermes, and carries the work forward—while ordinary conversation stays out of memory and actions.</p>
         <div class="trust-row" aria-label="Privacy and infrastructure">
-          <span><i class="check">✓</i>Private by default</span><span><i class="check">✓</i>Local on Spark</span><span><i class="check">✓</i>Approval before action</span>
+          <span><i class="check">✓</i>Complete local archive</span><span><i class="check">✓</i>Local on Spark</span><span><i class="check">✓</i>Approval before action</span>
         </div>
       </div>
       <div class="ambient-status" aria-label="Listening status">
@@ -40,7 +40,29 @@
       <div class="metric"><span>Signals observed</span><strong id="mArchive">0</strong><small>Consent-safe archive</small></div>
       <div class="metric"><span>Work delegated</span><strong id="mJobs">0</strong><small>Durable Hermes jobs</small></div>
       <div class="metric"><span>Outcomes delivered</span><strong id="mDone">0</strong><small>Verified complete</small></div>
-      <div class="overview-note"><span class="shield">◇</span><div><strong>Privacy boundary active</strong><small>Non-actionable conversation is discarded before persistence.</small></div></div>
+      <div class="overview-note"><span class="shield">◇</span><div><strong>Action boundary active</strong><small>Ordinary conversation stays archive-only and never enters operational memory.</small></div></div>
+    </section>
+
+    <section class="panel desktop-panel" aria-labelledby="desktopTitle">
+      <div class="panel-head">
+        <div><p class="kicker">Computer use · Orgo control plane</p><h2 id="desktopTitle">Live agent desktop</h2></div>
+        <span id="desktopState" class="desktop-state offline"><i></i>Not configured</span>
+      </div>
+      <div class="desktop-grid">
+        <div class="desktop-viewer">
+          <div class="desktop-chrome"><span><i></i><i></i><i></i></span><b id="desktopRoute">Automatic routing</b><small id="desktopResolution">—</small></div>
+          <div class="desktop-screen">
+            <img id="desktopFrame" alt="Live Orgo agent desktop" hidden>
+            <div id="desktopEmpty" class="desktop-empty"><span>⌁</span><strong>Desktop waiting</strong><small>Local Orgo is preferred; the default remote computer is the fallback.</small></div>
+          </div>
+        </div>
+        <div class="desktop-evidence">
+          <div class="route-row"><span><small>Selected plane</small><strong id="desktopProvider">Unavailable</strong></span><span><small>Computer</small><strong id="desktopComputer">—</strong></span></div>
+          <div class="last-action"><small>Latest verified action</small><strong id="desktopAction">No desktop action yet</strong><p id="desktopVerification">Before/after visual fingerprints will appear here.</p></div>
+          <div class="desktop-tool-list" aria-label="Available desktop tools"><span>Screenshot</span><span>Click</span><span>Type</span><span>Key</span><span>Scroll</span><span>Drag</span></div>
+          <button id="refreshDesktop" class="secondary" type="button">Refresh desktop</button>
+        </div>
+      </div>
     </section>
 
     <section class="workspace">
@@ -79,6 +101,6 @@
   </main>
 
   <footer><span>Followthrough</span><span>Hermes · NVIDIA Spark · Cloudflare edge</span><span>Built for conversations worth continuing.</span></footer>
-  <script src="/static/app.js?v=20260712-3"></script>
+  <script src="/static/app.js?v=20260712-4"></script>
 </body>
 </html>

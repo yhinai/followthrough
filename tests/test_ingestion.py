@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import time
 
 from fastapi.testclient import TestClient
 
 from followthrough.app import create_app
-from followthrough.store import now
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -38,24 +36,19 @@ def test_actionable_replay_creates_one_run(configured_settings) -> None:
     settings, _, device_token = configured_settings
     app = create_app(settings)
 
-    def fake_process(run_id, text, classification, **_):
-        app.state.store.update_run(run_id, status="completed", finished_at=now(), success=1)
-        return {"run_id": run_id, "status": "completed", "classification": classification.__dict__}
-
-    app.state.crew.process = fake_process
     payload = {"event_id": "event-actionable-0001", "device_id": "phone", "text": "Research this GitHub repo https://github.com/NousResearch/hermes-agent", "source": "phone", "consent": True}
     with TestClient(app) as client:
         first = client.post("/api/v1/transcripts", headers=_auth(device_token), json=payload)
         second = client.post("/api/v1/transcripts", headers=_auth(device_token), json=payload)
-        for _ in range(50):
-            if app.state.store.get_run(first.json()["run_id"])["status"] == "completed":
-                break
-            time.sleep(0.01)
     assert first.status_code == 202
     assert second.status_code == 202
     assert first.json()["run_id"] == second.json()["run_id"]
+    assert first.json()["status"] == "queued"
     assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
-    assert app.state.store.get_run(first.json()["run_id"])["status"] == "completed"
+    # Replay short-circuits on the archived event: one run, one durable job.
+    assert second.json()["created"] is False
+    assert app.state.store.db.execute("SELECT COUNT(*) FROM hermes_jobs").fetchone()[0] == 1
+    assert app.state.store.hermes_job_for_run(first.json()["run_id"])["id"]
 
 
 def test_phone_fragments_are_centrally_aggregated_before_dispatch(configured_settings) -> None:

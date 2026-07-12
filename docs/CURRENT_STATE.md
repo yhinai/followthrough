@@ -23,7 +23,7 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 
 - Public health endpoint, Followthrough, orchestrator, and Cloudflare tunnel are active.
 - Public health reports `auth_required: false`; there are no Followthrough token files, token middleware, or dashboard token prompts.
-- Followthrough Python suite: 150 passed after the lean-runtime cleanup.
+- Followthrough Python suite: 164 passed after the H session and Orgo desktop-control additions.
 - Memo Android build: successful on OpenJDK 17.
 - Samsung `SM-F776U1`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified.
 
@@ -41,6 +41,7 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 | Layer | Current tool |
 |---|---|
 | Phone capture and playback | Memo Android foreground service, `AudioRecord`, `AudioTrack`, Gemini Live |
+| Desktop execution surface | Local-first Orgo Desktop API with remote Orgo fallback, verified action receipts, and a live dashboard screenshot |
 | Public ingress | Cloudflare Tunnel at `followthrough.alhinai.dev` |
 | API and dashboard | FastAPI/Uvicorn on Spark |
 | Durable state | Separate SQLite operations, archive, effects, and Hermes Kanban ledgers |
@@ -84,3 +85,9 @@ The product is operational. The physical Samsung has verified continuous audio,
 finalized transcript ingestion, completed Hermes research, restart-safe result
 recovery, and built-in-speaker routing. A fresh spoken actionable phrase remains
 the recommended final demo rehearsal; it is not a soak requirement.
+
+The Orgo desktop subsystem is implemented and tested but currently displays
+`Not configured` on Spark because neither a co-located Orgo Desktop API nor
+`ORGO_API_KEY` plus `ORGO_DEFAULT_COMPUTER_ID` is installed. This is an
+explicit readiness state, not a silent fallback. Live Orgo acceptance remains
+pending credential and computer provisioning.

@@ -6,22 +6,21 @@ from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 load_dotenv(Path.home() / ".config" / "followthrough" / "secrets.env")
 load_dotenv(Path.home() / ".config" / "hai" / ".env")
 
-
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=None, env_prefix="FOLLOWTHROUGH_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=None, env_prefix="FOLLOWTHROUGH_", extra="ignore", populate_by_name=True
+    )
 
     public_url: str = "http://127.0.0.1:18765"
     host: str = "0.0.0.0"
     port: int = 18765
     db_path: Path = ROOT / "data" / "followthrough.db"
     archive_db_path: Path = ROOT / "data" / "archive" / "archive.db"
-    reports_dir: Path = ROOT / "data" / "reports"
     jobs_dir: Path = ROOT / "data" / "jobs"
     runner_dir: Path = ROOT / "data" / "runner"
     runner_receipts_dir: Path = ROOT / "data" / "runner" / "receipts"
@@ -52,21 +51,17 @@ class Settings(BaseSettings):
     h_poll_seconds: float = 1.0
     h_max_steps: int = 30
     h_max_time_seconds: int = 300
-
-    convex_url: str = Field("", validation_alias="CONVEX_URL")
-    convex_deploy_key: str = Field("", validation_alias="CONVEX_DEPLOY_KEY")
-    linkup_api_key: str = Field("", validation_alias="LINKUP_API_KEY")
-    elevenlabs_api_key: str = Field("", validation_alias="ELEVENLABS_API_KEY")
-    elevenlabs_voice_id: str = Field("21m00Tcm4TlvDq8ikWAM", validation_alias="ELEVENLABS_VOICE_ID")
-    dodo_payments_api_key: str = Field("", validation_alias="DODO_PAYMENTS_API_KEY")
-    dodo_product_id: str = Field("", validation_alias="DODO_PRODUCT_ID")
-    dodo_payments_environment: str = Field("test_mode", validation_alias="DODO_PAYMENTS_ENVIRONMENT")
-    dodo_payments_webhook_key: str = Field("", validation_alias="DODO_PAYMENTS_WEBHOOK_KEY")
+    orgo_api_key: str = Field("", validation_alias="ORGO_API_KEY")
+    orgo_default_computer_id: str = Field("", validation_alias="ORGO_DEFAULT_COMPUTER_ID")
+    orgo_api_base: str = "https://www.orgo.ai/api"
+    orgo_local_base: str = "http://127.0.0.1:8080"
+    orgo_desktop_api_token: str = Field("", validation_alias="ORGO_DESKTOP_API_TOKEN")
+    vnc_password: str = Field("", validation_alias="VNC_PASSWORD")
+    orgo_action_timeout_seconds: int = 60
 
     def model_post_init(self, __context: object) -> None:
         self.db_path = Path(self.db_path).expanduser().resolve()
         self.archive_db_path = Path(self.archive_db_path).expanduser().resolve()
-        self.reports_dir = Path(self.reports_dir).expanduser().resolve()
         self.jobs_dir = Path(self.jobs_dir).expanduser().resolve()
         self.runner_dir = Path(self.runner_dir).expanduser().resolve()
         self.runner_receipts_dir = Path(self.runner_receipts_dir).expanduser().resolve()
@@ -78,12 +73,10 @@ class Settings(BaseSettings):
         self.hermes_python = Path(self.hermes_python).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.archive_db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.runner_dir.mkdir(parents=True, exist_ok=True)
         self.runner_receipts_dir.mkdir(parents=True, exist_ok=True)
         self.effects_dir.mkdir(parents=True, exist_ok=True)
         self.audio_dir.mkdir(parents=True, exist_ok=True)
-
 
 settings = Settings()

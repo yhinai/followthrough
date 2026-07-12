@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
@@ -22,18 +22,24 @@ from .bus import bus
 from .classifier import Classification
 from .config import Settings, settings
 from .controls import Capability, ControlPlane
-from .crew import Crew
+from .desktop import DesktopError, DesktopRouter
+from .hcompany import HCompanyExecutor
 from .integrations import operational_entity
 from .models import (
     CapabilityControlIn,
     CapabilityLimitIn,
+    ComputerUseIn,
+    DesktopClickIn,
+    DesktopDragIn,
+    DesktopKeyIn,
+    DesktopLifecycleIn,
+    DesktopScrollIn,
+    DesktopTypeIn,
     GlobalControlIn,
     InterestWeightIn,
     RelevanceCorrectionIn,
-    RoleIn,
     SafeModeIn,
     SignalIn,
-    SignupIn,
     TaskControlIn,
     TranscriptEventIn,
 )
@@ -242,12 +248,12 @@ def _omi_segment_events(
 
 
 def create_app(config: Settings = settings) -> FastAPI:
-    config.reports_dir.mkdir(parents=True, exist_ok=True)
     store = Store(config.db_path)
     archive_store = ArchiveStore(config.archive_db_path)
     archive = ArchiveStorage(config.audio_dir)
-    crew = Crew(store, config)
     controls = ControlPlane(store)
+    h_executor = HCompanyExecutor(store, config, bus.publish)
+    desktop = DesktopRouter(store, config)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -265,8 +271,9 @@ def create_app(config: Settings = settings) -> FastAPI:
     application.state.store = store
     application.state.archive_store = archive_store
     application.state.archive = archive
-    application.state.crew = crew
     application.state.controls = controls
+    application.state.h_executor = h_executor
+    application.state.desktop = desktop
     application.state.background_tasks = set()
     application.state.transcript_aggregators = {}
     static = Path(__file__).parent / "static"
@@ -286,30 +293,6 @@ def create_app(config: Settings = settings) -> FastAPI:
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
-
-    async def finish_run(
-        run_id: str, event_id: str, transcript: str, classification: Any, allow_owner_report: bool
-    ) -> None:
-        try:
-            result = await asyncio.to_thread(
-                crew.process,
-                run_id,
-                transcript,
-                classification,
-                allow_owner_report=allow_owner_report,
-            )
-            await bus.publish("run_completed", {"event_id": event_id, **result})
-        except Exception as exc:
-            store.update_run(run_id, status="failed", finished_at=_utc(), success=0)
-            store.add_eval(
-                run_id,
-                "[complete archive]",
-                "completed autonomous run",
-                f"worker failure: {type(exc).__name__}",
-            )
-            await bus.publish(
-                "run_failed", {"event_id": event_id, "run_id": run_id, "error": type(exc).__name__}
-            )
 
     def authorize_capture(idempotency_key: str, actor: str) -> None:
         decision = controls.authorize(
@@ -390,11 +373,25 @@ def create_app(config: Settings = settings) -> FastAPI:
             "orchestrator": "hermes-kanban",
         }
 
+    def start_computer_use(
+        task_text: str, *, source_event_id: str | None = None, start_url: str | None = None
+    ) -> dict[str, object]:
+        session = store.create_computer_session(
+            task=task_text,
+            agent=config.h_agent,
+            source_event_id=source_event_id,
+        )
+        task = asyncio.create_task(
+            h_executor.run(session["id"], task_text, start_url=start_url)
+        )
+        application.state.background_tasks.add(task)
+        task.add_done_callback(application.state.background_tasks.discard)
+        return session
+
     async def ingest(
         payload: TranscriptEventIn,
         *,
         speaker: SpeakerContext,
-        defer_actions: bool = False,
         suppress_dispatch: bool = False,
     ) -> dict[str, object]:
         transcript = payload.text.strip()
@@ -497,51 +494,23 @@ def create_app(config: Settings = settings) -> FastAPI:
         store.add_operational_memory(
             archived["id"], run_id, relevance.content_fingerprint, category, subject
         )
-        allow_owner_report = bool(payload.metadata.get("allow_owner_report", True))
-        if config.kanban_enabled:
-            queued = await enqueue_durable_job(
-                run_id, archived["id"], payload.event_id, category, subject
-            )
-            return {
-                "event_id": payload.event_id,
-                "archive_id": archived["id"],
-                "created": True,
-                "classification": classification.__dict__,
-                **queued,
-            }
-        if not controls.operation_allowed(Capability.ACTIONS):
-            store.update_run(run_id, status="paused", success=None, finished_at=None)
-            return {
-                "event_id": payload.event_id,
-                "archive_id": archived["id"],
-                "created": True,
-                "status": "parked",
-                "run_id": run_id,
-                "classification": classification.__dict__,
-            }
-        if defer_actions:
-            task = asyncio.create_task(
-                finish_run(run_id, payload.event_id, transcript, classification, allow_owner_report)
-            )
-            application.state.background_tasks.add(task)
-            task.add_done_callback(application.state.background_tasks.discard)
-            return {
-                "event_id": payload.event_id,
-                "archive_id": archived["id"],
-                "created": True,
-                "status": "queued",
-                "run_id": run_id,
-                "classification": classification.__dict__,
-            }
-        result = await asyncio.to_thread(
-            crew.process, run_id, transcript, classification, allow_owner_report=allow_owner_report
+        queued = await enqueue_durable_job(
+            run_id, archived["id"], payload.event_id, category, subject
         )
-        await bus.publish("run_completed", {"event_id": payload.event_id, **result})
+        computer_use = None
+        if category == "web_task":
+            computer_use = start_computer_use(
+                subject,
+                source_event_id=payload.event_id,
+                start_url=payload.metadata.get("start_url"),
+            )
         return {
             "event_id": payload.event_id,
             "archive_id": archived["id"],
             "created": True,
-            **result,
+            "classification": classification.__dict__,
+            **queued,
+            **({"computer_use_id": computer_use["id"]} if computer_use else {}),
         }
 
     @application.get("/", response_class=HTMLResponse)
@@ -560,6 +529,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             "database_ready": database_ready,
             "archive_ready": archive_ready,
             "auth_required": False,
+            "h_company_configured": h_executor.configured,
             "hermes_cli_present": shutil.which(config.hermes_bin) is not None,
             "orchestrator": orchestrator,
             "job_counts": store.hermes_job_counts(),
@@ -597,7 +567,6 @@ def create_app(config: Settings = settings) -> FastAPI:
         result = await ingest(
             payload,
             speaker=speaker,
-            defer_actions=True,
             suppress_dispatch=aggregate is not None,
         )
         if aggregate and aggregator:
@@ -614,7 +583,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                     "aggregate_window_seconds": aggregator.window_seconds,
                 },
             )
-            aggregate_result = await ingest(aggregate_payload, speaker=speaker, defer_actions=True)
+            aggregate_result = await ingest(aggregate_payload, speaker=speaker)
             return {
                 **aggregate_result,
                 "aggregate_event_id": aggregate.event_id,
@@ -723,7 +692,6 @@ def create_app(config: Settings = settings) -> FastAPI:
                     is_user=is_user,
                     ambient_authorized=True,
                 ),
-                defer_actions=True,
             )
             for event, is_user in events
         ]
@@ -744,7 +712,6 @@ def create_app(config: Settings = settings) -> FastAPI:
                     is_user=is_user,
                     ambient_authorized=True,
                 ),
-                defer_actions=True,
             )
             for event, is_user in events
         ]
@@ -891,7 +858,6 @@ def create_app(config: Settings = settings) -> FastAPI:
                 is_user=is_user,
                 ambient_authorized=True,
             ),
-            defer_actions=True,
         )
 
     @application.get("/api/relevance/{event_id}")
@@ -978,16 +944,9 @@ def create_app(config: Settings = settings) -> FastAPI:
             store.add_operational_memory(
                 archived["id"], run_id, result.content_fingerprint, category, subject
             )
-            if config.kanban_enabled:
-                await enqueue_durable_job(
-                    run_id, archived["id"], payload.event_id, category, subject
-                )
-            else:
-                task = asyncio.create_task(
-                    finish_run(run_id, payload.event_id, transcript, classification, True)
-                )
-                application.state.background_tasks.add(task)
-                task.add_done_callback(application.state.background_tasks.discard)
+            await enqueue_durable_job(
+                run_id, archived["id"], payload.event_id, category, subject
+            )
         elif not result.dispatch_allowed and run_id:
             cancelled = store.cancel_nonrunning_hermes_job(
                 run_id,
@@ -1101,23 +1060,6 @@ def create_app(config: Settings = settings) -> FastAPI:
     ) -> dict[str, object]:
         return controls.resume_parked(actor=payload.actor, reason_code=payload.reason_code)
 
-    @application.post("/api/signup")
-    async def signup(
-        payload: SignupIn
-    ) -> dict[str, bool]:
-        store.signup(str(payload.email), payload.source)
-        return {"ok": True}
-
-    @application.post("/api/roles")
-    async def add_role(
-        payload: RoleIn
-    ) -> dict[str, object]:
-        return store.add_role(payload.name, payload.job, payload.tools, payload.guardrails)
-
-    @application.get("/api/roles")
-    async def roles() -> list[dict[str, object]]:
-        return store.roles()
-
     @application.get("/api/runs")
     async def runs() -> list[dict[str, object]]:
         return store.list_runs()
@@ -1140,10 +1082,11 @@ def create_app(config: Settings = settings) -> FastAPI:
             "orchestrator": store.heartbeat_status("orchestrator"),
             "integrations": {
                 "hermes": shutil.which(config.hermes_bin) is not None,
-                "convex": bool(config.convex_url),
-                "linkup": bool(config.linkup_api_key),
-                "elevenlabs": bool(config.elevenlabs_api_key),
-                "dodo": bool(config.dodo_payments_api_key),
+                "h_company": h_executor.configured,
+                "orgo_remote": bool(
+                    config.orgo_api_key and config.orgo_default_computer_id
+                ),
+                "orgo_local": bool(desktop.local_token),
             },
         }
 
@@ -1171,23 +1114,110 @@ def create_app(config: Settings = settings) -> FastAPI:
             )
         return result
 
-    @application.get("/api/audio/{filename}")
-    async def audio(
-        filename: str
-    ) -> FileResponse:
-        path = _safe_child(config.reports_dir.parent / "audio", filename)
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="audio not found")
-        return FileResponse(path, media_type="audio/mpeg")
+    @application.post("/api/computer-use", status_code=202)
+    async def launch_computer_use(payload: ComputerUseIn) -> dict[str, object]:
+        return start_computer_use(
+            payload.task,
+            source_event_id=payload.source_event_id,
+            start_url=payload.start_url,
+        )
 
-    @application.get("/api/reports/{filename}")
-    async def report(
-        filename: str
-    ) -> FileResponse:
-        path = _safe_child(config.reports_dir, filename)
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="report not found")
-        return FileResponse(path, media_type="text/markdown")
+    @application.get("/api/computer-use")
+    async def computer_use_sessions() -> list[dict[str, object]]:
+        return store.list_computer_sessions()
+
+    @application.get("/api/computer-use/{identifier}")
+    async def computer_use_session(identifier: str) -> dict[str, object]:
+        found = store.computer_session(identifier)
+        if not found:
+            raise HTTPException(status_code=404, detail="computer-use session not found")
+        return found
+
+    @application.post("/api/computer-use/{identifier}/cancel")
+    async def cancel_computer_use(identifier: str) -> dict[str, object]:
+        try:
+            return await h_executor.cancel(identifier)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="computer-use session not found") from exc
+
+    @application.get("/api/desktop/doctor")
+    async def desktop_doctor(computer_id: str | None = Query(default=None)) -> dict[str, object]:
+        return await desktop.doctor(computer_id)
+
+    @application.get("/api/desktop/screenshot")
+    async def desktop_screenshot(computer_id: str | None = Query(default=None)) -> Response:
+        try:
+            png, metadata = await desktop.screenshot(computer_id)
+        except DesktopError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return Response(
+            png,
+            media_type="image/png",
+            headers={
+                "X-Desktop-Provider": str(metadata["provider"]),
+                "X-Desktop-Fingerprint": str(metadata["fingerprint"]),
+                "Cache-Control": "no-store",
+            },
+        )
+
+    async def publish_desktop(receipt: dict[str, object]) -> dict[str, object]:
+        await bus.publish("desktop_action", receipt)
+        return receipt
+
+    @application.post("/api/desktop/click")
+    async def desktop_click(payload: DesktopClickIn) -> dict[str, object]:
+        try:
+            return await publish_desktop(await desktop.click(**payload.model_dump()))
+        except DesktopError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @application.post("/api/desktop/drag")
+    async def desktop_drag(payload: DesktopDragIn) -> dict[str, object]:
+        try:
+            return await publish_desktop(await desktop.drag(**payload.model_dump()))
+        except DesktopError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @application.post("/api/desktop/type")
+    async def desktop_type(payload: DesktopTypeIn) -> dict[str, object]:
+        try:
+            return await publish_desktop(
+                await desktop.type_text(
+                    payload.text,
+                    delay_ms=payload.delay_ms,
+                    computer_id=payload.computer_id,
+                    verify=payload.verify,
+                )
+            )
+        except DesktopError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @application.post("/api/desktop/key")
+    async def desktop_key(payload: DesktopKeyIn) -> dict[str, object]:
+        try:
+            return await publish_desktop(await desktop.key(**payload.model_dump()))
+        except DesktopError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @application.post("/api/desktop/scroll")
+    async def desktop_scroll(payload: DesktopScrollIn) -> dict[str, object]:
+        try:
+            return await publish_desktop(await desktop.scroll(**payload.model_dump()))
+        except DesktopError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @application.post("/api/desktop/lifecycle")
+    async def desktop_lifecycle(payload: DesktopLifecycleIn) -> dict[str, object]:
+        try:
+            return await publish_desktop(await desktop.lifecycle(**payload.model_dump()))
+        except DesktopError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get("/api/desktop/actions")
+    async def desktop_actions() -> list[dict[str, object]]:
+        return store.list_desktop_actions()
 
     @application.get("/api/events")
     async def events() -> StreamingResponse:

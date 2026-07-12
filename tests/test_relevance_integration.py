@@ -1,5 +1,4 @@
 from __future__ import annotations
-import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -21,23 +20,16 @@ def _database_bytes(path: Path) -> bytes:
     return data
 
 
-def _wait_completed(app, run_id: str) -> None:
-    for _ in range(50):
-        if app.state.store.get_run(run_id)["status"] == "completed":
-            return
-        time.sleep(0.01)
-    raise AssertionError("background run did not complete")
+def _assert_job_queued(app, run_id: str) -> None:
+    job = app.state.store.hermes_job_for_run(run_id)
+    assert job is not None, "relevant signal did not create a durable Hermes job"
+    assert job["state"] in {"pending", "enqueued"}
 
 
 def test_archive_is_physically_separate_and_operational_memory_is_relevance_gated(configured_settings) -> None:
     settings, dashboard_token, device_token = configured_settings
     app = create_app(settings)
 
-    def fake_process(run_id, text, classification, **_):
-        app.state.store.update_run(run_id, status="completed", finished_at=now(), success=1)
-        return {"run_id": run_id, "status": "completed"}
-
-    app.state.crew.process = fake_process
     raw = "Research the GitHub repository https://github.com/BasedHardware/omi unique-separation-canary"
     with TestClient(app) as client:
         response = client.post(
@@ -47,7 +39,7 @@ def test_archive_is_physically_separate_and_operational_memory_is_relevance_gate
         )
         assert response.status_code == 202
         run_id = response.json()["run_id"]
-        _wait_completed(app, run_id)
+        _assert_job_queued(app, run_id)
         memories = client.get("/api/memory/operational", headers=_auth(dashboard_token))
         assert memories.status_code == 200
         assert len(memories.json()) == 1
@@ -69,16 +61,6 @@ def test_archived_omi_non_owner_correction_restores_ambient_authorization(
     settings, dashboard_token, device_token = configured_settings
     app = create_app(settings)
 
-    def fake_process(run_id, text, classification, **_):
-        app.state.store.update_run(
-            run_id,
-            status="completed",
-            finished_at=now(),
-            success=1,
-        )
-        return {"run_id": run_id, "status": "completed"}
-
-    app.state.crew.process = fake_process
     payload = {
         "segments": [
             {
@@ -123,7 +105,7 @@ def test_archived_omi_non_owner_correction_restores_ambient_authorization(
         assert corrected.json()["relevance"]["owner_status"] == "non_owner"
         assert corrected.json()["relevance"]["ambient_authorized"] is True
         assert corrected.json()["relevance"]["dispatch_allowed"] is True
-        _wait_completed(app, corrected.json()["run_id"])
+        _assert_job_queued(app, corrected.json()["run_id"])
 
     irrelevant = app.state.archive_store.by_event(
         "omi:segment:ambient-device:irrelevant-non-owner"
@@ -200,11 +182,6 @@ def test_interest_mute_and_owner_correction_are_applied(configured_settings) -> 
     settings, dashboard_token, device_token = configured_settings
     app = create_app(settings)
 
-    def fake_process(run_id, text, classification, **_):
-        app.state.store.update_run(run_id, status="completed", finished_at=now(), success=1)
-        return {"run_id": run_id, "status": "completed"}
-
-    app.state.crew.process = fake_process
     with TestClient(app) as client:
         muted = client.post(
             "/api/relevance/interests",
@@ -232,5 +209,5 @@ def test_interest_mute_and_owner_correction_are_applied(configured_settings) -> 
         )
         assert corrected.status_code == 202
         assert corrected.json()["relevance"]["dispatch_allowed"] is True
-        _wait_completed(app, corrected.json()["run_id"])
+        _assert_job_queued(app, corrected.json()["run_id"])
     assert app.state.store.db.execute("SELECT COUNT(*) FROM operational_memories").fetchone()[0] == 1

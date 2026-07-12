@@ -28,6 +28,52 @@ class ComputerUseIn(BaseModel):
     start_url: str | None = Field(default=None, pattern=r"^https://", max_length=2_000)
 
 
+class DesktopClickIn(BaseModel):
+    x: int = Field(ge=0, le=10_000)
+    y: int = Field(ge=0, le=10_000)
+    button: Literal["left", "right", "middle"] = "left"
+    double: bool = False
+    verify: bool = True
+    computer_id: str | None = Field(default=None, max_length=100)
+
+
+class DesktopDragIn(BaseModel):
+    start_x: int = Field(ge=0, le=10_000)
+    start_y: int = Field(ge=0, le=10_000)
+    end_x: int = Field(ge=0, le=10_000)
+    end_y: int = Field(ge=0, le=10_000)
+    verify: bool = True
+    computer_id: str | None = Field(default=None, max_length=100)
+
+
+class DesktopTypeIn(BaseModel):
+    text: str = Field(min_length=1, max_length=20_000)
+    delay_ms: int = Field(default=12, ge=0, le=1_000)
+    verify: bool = True
+    computer_id: str | None = Field(default=None, max_length=100)
+
+
+class DesktopKeyIn(BaseModel):
+    key: str = Field(min_length=1, max_length=100)
+    verify: bool = True
+    computer_id: str | None = Field(default=None, max_length=100)
+
+
+class DesktopScrollIn(BaseModel):
+    direction: Literal["up", "down"]
+    amount: int = Field(default=3, ge=1, le=20)
+    x: int = Field(default=640, ge=0, le=10_000)
+    y: int = Field(default=360, ge=0, le=10_000)
+    verify: bool = True
+    computer_id: str | None = Field(default=None, max_length=100)
+
+
+class DesktopLifecycleIn(BaseModel):
+    operation: Literal["ensure_running", "start", "stop", "restart"]
+    computer_id: str | None = Field(default=None, max_length=100)
+    confirmed: bool = False
+
+
 class TranscriptEventIn(BaseModel):
     event_id: str = Field(min_length=8, max_length=200)
     device_id: str = Field(min_length=1, max_length=100)
@@ -130,7 +176,5 @@ class RunView(BaseModel):
     finished_at: str | None
     latency_ms: int
     success: bool | None
-    report_url: str | None
-    voice_url: str | None
     summary: str | None
     steps: list[StepView] = Field(default_factory=list)

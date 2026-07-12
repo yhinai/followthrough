@@ -10,17 +10,12 @@ dependencies = [
   "pydantic-settings>=2.7",
   "python-dotenv>=1.0",
   "python-multipart>=0.0.20",
+  "pillow>=11.0",
   "email-validator>=2.2",
   "uvicorn[standard]>=0.34",
 ]
 
 [project.optional-dependencies]
-partners = [
-  "convex>=0.7",
-  "dodopayments>=1.0",
-  "elevenlabs>=2.0",
-  "linkup-sdk>=0.12",
-]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.25", "ruff>=0.9"]
 
 [build-system]

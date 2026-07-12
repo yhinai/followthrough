@@ -47,13 +47,23 @@ class KanbanCommandError(RuntimeError):
     """A sanitized Hermes command failure that never includes command payloads."""
 
 
+_PROMPT_DELIMITER = re.compile(r"</?\s*untrusted_transcript\s*>", re.IGNORECASE)
+
+
 def _clean_text(value: object, *, maximum: int) -> str:
-    """Normalize capsule fields without preserving controls or unbounded text."""
+    """Normalize capsule fields without preserving controls or unbounded text.
+
+    Capsule text is derived from speech and is therefore attacker-influenced.
+    Defang the fence delimiters so a spoken phrase cannot close the untrusted
+    region of a downstream worker prompt and have the rest read as trusted
+    instructions.
+    """
 
     if value is None:
         return ""
     cleaned = " ".join(str(value).split())
     cleaned = "".join(character for character in cleaned if character.isprintable())
+    cleaned = _PROMPT_DELIMITER.sub("[redacted-delimiter]", cleaned)
     return cleaned[:maximum]
 
 

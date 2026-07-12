@@ -20,6 +20,6 @@ def configured_settings(tmp_path: Path) -> tuple[Settings, str, str]:
         jobs_dir=tmp_path / "jobs",
         audio_dir=tmp_path / "archive" / "audio",
         public_url="https://example.test",
-        kanban_enabled=False,
+        kanban_enabled=True,
     )
     return settings, dashboard_token, device_token

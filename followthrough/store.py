@@ -95,6 +95,20 @@ class Store:
               idempotency_key TEXT NOT NULL, outcome TEXT NOT NULL,
               reason TEXT NOT NULL, archived_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS computer_use_sessions (
+              id TEXT PRIMARY KEY, source_event_id TEXT, task TEXT NOT NULL,
+              provider TEXT NOT NULL, agent TEXT NOT NULL, h_session_id TEXT UNIQUE,
+              state TEXT NOT NULL, step_count INTEGER NOT NULL DEFAULT 0,
+              current_action TEXT, latest_answer TEXT, agent_view_url TEXT,
+              error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              finished_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS desktop_action_receipts (
+              id TEXT PRIMARY KEY, provider TEXT NOT NULL, computer_id TEXT,
+              action TEXT NOT NULL, visual_changed INTEGER, noop INTEGER,
+              fingerprint_before TEXT, fingerprint_after TEXT,
+              result_json TEXT NOT NULL, created_at TEXT NOT NULL
+            );
             """
         )
         self._ensure_column("runs", "archive_event_id", "TEXT")
@@ -109,6 +123,82 @@ class Store:
         self._ensure_column("hermes_jobs", "notification_attempts", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("hermes_jobs", "last_polled_at", "TEXT")
         self.db.commit()
+
+    def create_computer_session(
+        self, *, task: str, agent: str, source_event_id: str | None = None
+    ) -> dict[str, Any]:
+        identifier = str(uuid.uuid4())
+        timestamp = now()
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO computer_use_sessions(id,source_event_id,task,provider,agent,state,created_at,updated_at) VALUES(?,?,?,'h-company',?,'starting',?,?)",
+                (identifier, source_event_id, task, agent, timestamp, timestamp),
+            )
+            self.db.commit()
+        return self.computer_session(identifier) or {}
+
+    def update_computer_session(self, identifier: str, **values: Any) -> dict[str, Any]:
+        allowed = {
+            "h_session_id", "state", "step_count", "current_action", "latest_answer",
+            "agent_view_url", "error", "finished_at",
+        }
+        changes = {key: value for key, value in values.items() if key in allowed}
+        if changes:
+            changes["updated_at"] = now()
+            columns = ",".join(f"{key}=?" for key in changes)
+            with self.lock:
+                self.db.execute(
+                    f"UPDATE computer_use_sessions SET {columns} WHERE id=?",
+                    (*changes.values(), identifier),
+                )
+                self.db.commit()
+        return self.computer_session(identifier) or {}
+
+    def computer_session(self, identifier: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT * FROM computer_use_sessions WHERE id=? OR h_session_id=?",
+            (identifier, identifier),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_computer_sessions(self, limit: int = 30) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.db.execute(
+                "SELECT * FROM computer_use_sessions ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        ]
+
+    def record_desktop_action(self, receipt: dict[str, Any]) -> dict[str, Any]:
+        identifier = str(receipt.get("id") or uuid.uuid4())
+        timestamp = str(receipt.get("created_at") or now())
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO desktop_action_receipts(id,provider,computer_id,action,visual_changed,noop,fingerprint_before,fingerprint_after,result_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (
+                    identifier,
+                    str(receipt.get("provider") or "unknown"),
+                    receipt.get("computer_id"),
+                    str(receipt.get("action") or "unknown"),
+                    None if receipt.get("visual_changed") is None else int(bool(receipt["visual_changed"])),
+                    None if receipt.get("noop") is None else int(bool(receipt["noop"])),
+                    receipt.get("fingerprint_before"),
+                    receipt.get("fingerprint_after"),
+                    json.dumps(receipt.get("result") or {}, sort_keys=True, default=str),
+                    timestamp,
+                ),
+            )
+            self.db.commit()
+        row = self.db.execute("SELECT * FROM desktop_action_receipts WHERE id=?", (identifier,)).fetchone()
+        return dict(row) if row else {}
+
+    def list_desktop_actions(self, limit: int = 50) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.db.execute(
+                "SELECT * FROM desktop_action_receipts ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        ]
 
     def _ensure_column(self, table: str, column: str, declaration: str) -> None:
         existing = {row[1] for row in self.db.execute(f"PRAGMA table_info({table})").fetchall()}

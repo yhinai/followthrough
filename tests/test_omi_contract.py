@@ -6,20 +6,11 @@ import time
 from fastapi.testclient import TestClient
 
 from followthrough.app import create_app
-from followthrough.store import now
 
 
 def test_official_omi_transcript_shapes_and_speaker_aliases(configured_settings) -> None:
     settings, _, device_token = configured_settings
     app = create_app(settings)
-    calls: list[str] = []
-
-    def fake_process(run_id, text, classification, **_):
-        calls.append(text)
-        app.state.store.update_run(run_id, status="completed", finished_at=now(), success=1)
-        return {"run_id": run_id, "status": "completed"}
-
-    app.state.crew.process = fake_process
     object_payload = {
         "session_id": "uid-1",
         "segments": [
