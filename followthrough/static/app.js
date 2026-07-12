@@ -3,6 +3,34 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character
 let browserListening = false;
 let recognition = null;
 let lastActivityId = null;
+let toastTimer = null;
+let latestActivity = [];
+let actionableOnly = false;
+const htmlCache = new Map();
+
+// Only touch the DOM when a section's markup actually changed, so the 1.5s poll
+// never wipes hover states, text selection, or in-flight CSS animations.
+function setHTML(selector, html) {
+  if (htmlCache.get(selector) === html) return;
+  htmlCache.set(selector, html);
+  $(selector).innerHTML = html;
+}
+
+// Relative timestamps live outside the cached markup: they are re-stamped every
+// tick without forcing a re-render of their section.
+const timeEl = (value) => `<time data-ts="${escapeHtml(value ?? "")}"></time>`;
+function refreshTimes() {
+  document.querySelectorAll("time[data-ts]").forEach((node) => { node.textContent = timeAgo(node.dataset.ts); });
+}
+
+function showToast(message, tone = "info") {
+  const toast = $("#toast");
+  toast.textContent = message;
+  toast.dataset.tone = tone;
+  toast.classList.add("visible");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("visible"), 3600);
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -26,10 +54,12 @@ async function sendSignal(text) {
   $("#submit").textContent = "Archiving and triaging…";
   try {
     const result = await jsonApi("/api/signals", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text, source:browserListening ? "voice" : "demo", consent:true})});
-    if (result.status === "archived") window.alert("Archive only — relevance correctly suppressed actions.");
+    if (result.status === "archived") showToast("Archived safely — no action was needed.");
+    else showToast("Signal received — Hermes is triaging it now.", "success");
+    $("#input").value = "";
     await load();
-  } catch (error) { window.alert(`Followthrough failed: ${error.message}`); }
-  finally { $("#submit").disabled = false; $("#submit").textContent = "Run through Hermes →"; }
+  } catch (error) { showToast(`Followthrough failed: ${error.message}`, "error"); }
+  finally { $("#submit").disabled = false; $("#submit").innerHTML = "Run through Hermes <span>→</span>"; }
 }
 
 async function setMode(mode, resumeParked = false) {
@@ -40,7 +70,8 @@ async function setMode(mode, resumeParked = false) {
 
 function setBrowserMic(on) {
   browserListening = on;
-  $("#listen").textContent = on ? "Stop browser mic" : "Browser mic";
+  $("#listen").innerHTML = `<span class="mic-dot"></span>${on ? "Stop browser mic" : "Browser mic"}`;
+  $("#listen").setAttribute("aria-pressed", String(on));
   if (on && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new Recognition(); recognition.continuous = true; recognition.interimResults = false;
@@ -53,17 +84,25 @@ function setBrowserMic(on) {
 function activityCard(item, index) {
   const fresh = index === 0 && item.event_id !== lastActivityId ? " fresh" : "";
   const disposition = item.relevant ? "actionable" : "observed";
-  return `<div class="activity-item${fresh}"><div class="source-icon ${escapeHtml(item.source)}">${item.source === "phone" || item.source === "omi" ? "◉" : "↗"}</div><div class="activity-copy"><div><span>${escapeHtml(label(item.classification))}</span><time>${escapeHtml(timeAgo(item.received_at))}</time></div><p>${escapeHtml(item.text)}</p><small class="${disposition}">${item.relevant ? "Promoted to Hermes" : "Archived · no action"}</small></div></div>`;
+  return `<div class="activity-item${fresh}"><div class="source-icon ${escapeHtml(item.source)}">${item.source === "phone" || item.source === "omi" ? "◉" : "↗"}</div><div class="activity-copy"><div><span>${escapeHtml(label(item.classification))}</span>${timeEl(item.received_at)}</div><p>${escapeHtml(item.text)}</p><small class="${disposition}">${item.relevant ? "Promoted to Hermes" : "Archived · no action"}</small></div></div>`;
+}
+
+function renderActivity() {
+  const visible = actionableOnly ? latestActivity.filter((item) => item.relevant) : latestActivity;
+  setHTML("#activity", visible.length
+    ? visible.slice(0, 9).map(activityCard).join("")
+    : `<div class="empty-state"><span class="empty-orbit"></span><strong>${actionableOnly ? "No actionable signals" : "Listening for a signal"}</strong><small>${actionableOnly ? "Everything is quiet for now." : "Your phone can stay in your pocket."}</small></div>`);
+  refreshTimes();
 }
 
 function jobRow(job) {
   const state = escapeHtml(job.state || "queued");
   const receipt = job.task_id ? escapeHtml(job.task_id) : "pending";
-  return `<div class="job-row"><div class="job-name"><span class="job-icon">${escapeHtml(String(job.category || "?").slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(job.entity || "Identified signal")}</strong><small>${escapeHtml(label(job.category))}</small></div></div><span class="status ${state}"><i></i>${state}</span><code>${receipt}</code><time>${escapeHtml(timeAgo(job.updated_at))}</time></div>`;
+  return `<div class="job-row"><div class="job-name"><span class="job-icon">${escapeHtml(String(job.category || "?").slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(job.entity || "Identified signal")}</strong><small>${escapeHtml(label(job.category))}</small></div></div><span class="status ${state}"><i></i>${state}</span><code>${receipt}</code>${timeEl(job.updated_at)}</div>`;
 }
 
 function memoryCard(item) {
-  return `<div class="memory-item"><span>${escapeHtml(String(item.category || "M").slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(item.entity)}</strong><small>${escapeHtml(label(item.category))} · ${escapeHtml(timeAgo(item.created_at))}</small></div></div>`;
+  return `<div class="memory-item"><span>${escapeHtml(String(item.category || "M").slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(item.entity)}</strong><small>${escapeHtml(label(item.category))} · ${timeEl(item.created_at)}</small></div></div>`;
 }
 
 function renderCurrentJob(jobs, activity) {
@@ -74,12 +113,12 @@ function renderCurrentJob(jobs, activity) {
   const signalIsNewer = latestSignal && (!job || new Date(latestSignal.received_at) > new Date(job.updated_at));
   if (!active.length && signalIsNewer && !latestSignal.relevant) {
     $("#currentJob").className = "current-job observed";
-    $("#currentJob").innerHTML = `<div class="focus-icon quiet">✓</div><span class="focus-state">Latest decision · ${escapeHtml(timeAgo(latestSignal.received_at))}</span><strong>No action required</strong><p>${escapeHtml(label(latestSignal.classification))} · safely archived</p><div class="progress-track"><i></i></div><small>Hermes was not invoked because the relevance gate found no actionable intent.</small>`;
+    setHTML("#currentJob", `<div class="focus-symbol quiet">✓</div><span class="focus-state">Latest decision · ${timeEl(latestSignal.received_at)}</span><strong>No action required</strong><p>${escapeHtml(label(latestSignal.classification))} · safely archived</p><div class="progress-track"><i></i></div><small>Hermes was not invoked because the relevance gate found no actionable intent.</small>`);
     return;
   }
   if (!job) return;
   $("#currentJob").className = `current-job ${escapeHtml(job.state)}`;
-  $("#currentJob").innerHTML = `<div class="focus-icon">H</div><span class="focus-state">${active.length ? "Hermes is working" : "Latest completed work"}</span><strong>${escapeHtml(job.entity || "Identified signal")}</strong><p>${escapeHtml(label(job.hermes_status || job.state))}</p><div class="progress-track"><i></i></div><small>${job.task_id ? `Receipt ${escapeHtml(job.task_id)}` : "Creating durable receipt…"}</small>`;
+  setHTML("#currentJob", `<div class="focus-symbol">H</div><span class="focus-state">${active.length ? "Hermes is working" : "Latest completed work"}</span><strong>${escapeHtml(job.entity || "Identified signal")}</strong><p>${escapeHtml(label(job.hermes_status || job.state))}</p><div class="progress-track"><i></i></div><small>${job.task_id ? `Receipt ${escapeHtml(job.task_id)}` : "Creating durable receipt…"}</small>`);
 }
 
 async function load() {
@@ -89,28 +128,56 @@ async function load() {
     ]);
     const mode = controls.global.mode;
     const healthy = metrics.orchestrator?.status === "ok";
-    $("#systemState").innerHTML = `<span class="pulse"></span> ${healthy ? "Spark + Hermes online" : "orchestrator attention"}`;
-    $("#systemState").classList.toggle("healthy", healthy);
+    const systemState = $("#systemState");
+    if (systemState) {
+      setHTML("#systemState", `<span class="pulse"></span> ${healthy ? "Online" : "Needs attention"}`);
+      systemState.classList.toggle("healthy", healthy);
+    }
     $("#lastSync").textContent = `Updated ${new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
     $("#modeLabel").textContent = mode.toUpperCase();
+    setHTML("#pause", `<span class="pause-icon"></span>${mode === "running" ? "Pause" : "Resume"}`);
+    $("#pause").setAttribute("aria-pressed", String(mode !== "running"));
     document.body.dataset.mode = mode;
     $("#mArchive").textContent = metrics.total ?? 0;
     $("#mJobs").textContent = jobs.length;
     $("#mDone").textContent = metrics.completed ?? 0;
-    $("#activity").innerHTML = activity.length ? activity.slice(0,9).map(activityCard).join("") : '<div class="empty-state"><span>◌</span>Waiting for the phone…</div>';
+    latestActivity = activity;
+    renderActivity();
     if (activity.length) lastActivityId = activity[0].event_id;
-    $("#jobs").innerHTML = jobs.length ? jobs.slice(0,12).map(jobRow).join("") : '<div class="empty-state">Waiting for the first relevant signal…</div>';
+    setHTML("#jobs", jobs.length ? jobs.slice(0,12).map(jobRow).join("") : '<div class="empty-state compact"><strong>No delegated work yet</strong><small>Qualified signals will become traceable work here.</small></div>');
     $("#jobSummary").textContent = `Live · ${jobs.filter((job) => job.state === "completed").length} completed · ${jobs.filter((job) => !["completed","cancelled","dead_letter","failed"].includes(job.state)).length} active`;
     renderCurrentJob(jobs, activity);
     $("#memoryCount").textContent = `Live · ${memories.length} items`;
-    $("#memories").innerHTML = memories.length ? memories.slice(0,7).map(memoryCard).join("") : '<div class="empty-state">Nothing promoted yet.</div>';
+    setHTML("#memories", memories.length ? memories.slice(0,7).map(memoryCard).join("") : '<div class="empty-state compact"><strong>No memory promoted</strong><small>Important entities and preferences will appear here.</small></div>');
+    refreshTimes();
   } catch (error) {
-    $("#systemState").textContent = `Server unreachable · ${error.message}`;
+    const systemState = $("#systemState");
+    if (systemState) systemState.textContent = `Server unreachable · ${error.message}`;
   }
 }
 
 $("#sample").onclick = () => { $("#input").value = "Research and safely evaluate https://github.com/pypa/sampleproject"; };
 $("#submit").onclick = () => sendSignal($("#input").value);
 $("#listen").onclick = () => setBrowserMic(!browserListening);
+$("#pause").onclick = () => setMode(document.body.dataset.mode === "running" ? "paused" : "running", true);
+$("#feedFilter").onclick = () => {
+  actionableOnly = !actionableOnly;
+  $("#feedFilter").setAttribute("aria-pressed", String(actionableOnly));
+  $("#feedFilter").textContent = actionableOnly ? "Show all signals" : "Show actionable only";
+  renderActivity();
+};
+document.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    sendSignal($("#input").value);
+  } else if (event.key === "/" && document.activeElement !== $("#input")) {
+    event.preventDefault();
+    const drawer = document.querySelector(".demo-drawer");
+    if (drawer) drawer.open = true;
+    $("#input").focus();
+  } else if (event.key === "Escape" && document.activeElement === $("#input")) {
+    $("#input").blur();
+  }
+});
 load();
 setInterval(load, 1500);

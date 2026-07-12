@@ -149,8 +149,8 @@ def test_native_authenticated_non_owner_is_held() -> None:
 
 def test_categories_are_deterministically_layered() -> None:
     result = evaluate_relevance(
-        "Clone the GitHub repo for this SDK startup, benchmark latency, add it as a todo, "
-        "register for its hackathon, email Maya, and make shipping it our goal.",
+        "Clone the GitHub repo for this SDK startup, order the eval board, benchmark latency, "
+        "add it as a todo, register for its hackathon, email Maya, and make shipping it our goal.",
         OMI_OWNER,
     )
     assert result.categories == CATEGORY_ORDER
@@ -270,3 +270,14 @@ def test_held_out_actionable_precision_and_recall_are_at_least_ninety_percent() 
     assert len(HELD_OUT_CASES) >= 20
     assert precision >= 0.90
     assert recall >= 0.90
+
+
+def test_spoken_web_command_is_classified_as_web_task():
+    from followthrough.relevance import Category, SpeakerContext, evaluate_relevance
+
+    result = evaluate_relevance(
+        "Book the cheapest flight from SFO to Tokyo on Saturday",
+        SpeakerContext.native_owner("owner-device"),
+    )
+    assert result.primary_category == Category.WEB_TASK
+    assert result.dispatch_allowed is True

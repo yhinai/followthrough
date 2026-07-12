@@ -35,6 +35,7 @@ class Disposition(str, Enum):
 
 class Category(str, Enum):
     REPOSITORY = "repository"
+    WEB_TASK = "web_task"
     TOOL = "tool"
     STARTUP = "startup"
     PERFORMANCE = "performance"
@@ -47,6 +48,7 @@ class Category(str, Enum):
 
 CATEGORY_ORDER: tuple[Category, ...] = (
     Category.REPOSITORY,
+    Category.WEB_TASK,
     Category.TOOL,
     Category.STARTUP,
     Category.PERFORMANCE,
@@ -325,6 +327,20 @@ _RULES: tuple[_Rule, ...] = (
         _rx(r"\b(?:git(?:hub)?\s+)?repo(?:sitory)?\b|\bgithub\s+project\b|\bclone\s+it\b"),
         0.93,
         "Recognized repository intent",
+    ),
+    _Rule(
+        "web_task.command",
+        Category.WEB_TASK,
+        _rx(
+            r"\b(?:book|reserve|order|purchase|add\s+to\s+cart|"
+            r"buy\s+(?:me\s+)?(?:a|an|the|some)\b|"
+            r"check\s+(?:the\s+)?price|price\s+(?:of|for|watch|check)|"
+            r"fill\s+(?:out|in)|sign\s+(?:me\s+)?up\s+for|apply\s+(?:to|for)|"
+            r"find\s+(?:me\s+)?(?:a|an|the|the\s+cheapest|cheap)\b|"
+            r"search\s+(?:the\s+web|online)\s+for)\b"
+        ),
+        0.94,
+        "Recognized a web task the computer-use agent can run",
     ),
     _Rule(
         "tool.software",

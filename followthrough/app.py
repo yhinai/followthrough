@@ -333,6 +333,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             "performance": "Research and test the named optimization using reproducible measurements without changing production defaults.",
             "event": "Research the named event, extract verified logistics and useful preparation actions.",
             "todo": "Turn the captured commitment into a concrete private task with a verifiable completion condition.",
+            "web_task": "Run the named task on the live web with the H Company computer-use agent (hai-agents platform MCP: run_agent, then wait_for_session). Return a short spoken-style summary of the outcome plus the session receipt.",
         }.get(
             category,
             "Research and evaluate the named item, then return cited findings and a safe next action.",

@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 load_dotenv(Path.home() / ".config" / "followthrough" / "secrets.env")
+load_dotenv(Path.home() / ".config" / "hai" / ".env")
 
 
 class Settings(BaseSettings):
@@ -45,6 +46,12 @@ class Settings(BaseSettings):
     kanban_cli_timeout_seconds: int = 30
     emergency_control_rto_seconds: int = 10
     hermes_python: Path = Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"
+    h_api_key: str = Field("", validation_alias="HAI_API_KEY")
+    h_api_base: str = "https://agp.eu.hcompany.ai/api/v2"
+    h_agent: str = "h/web-surfer-flash"
+    h_poll_seconds: float = 1.0
+    h_max_steps: int = 30
+    h_max_time_seconds: int = 300
 
     convex_url: str = Field("", validation_alias="CONVEX_URL")
     convex_deploy_key: str = Field("", validation_alias="CONVEX_DEPLOY_KEY")

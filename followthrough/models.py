@@ -22,6 +22,12 @@ class SignalIn(BaseModel):
     allow_owner_report: bool = True
 
 
+class ComputerUseIn(BaseModel):
+    task: str = Field(min_length=8, max_length=4_000)
+    source_event_id: str | None = Field(default=None, max_length=200)
+    start_url: str | None = Field(default=None, pattern=r"^https://", max_length=2_000)
+
+
 class TranscriptEventIn(BaseModel):
     event_id: str = Field(min_length=8, max_length=200)
     device_id: str = Field(min_length=1, max_length=100)

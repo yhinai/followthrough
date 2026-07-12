@@ -43,6 +43,11 @@ _ACTION_MARKERS = {
         r"(?i)\b(?:schedule|meeting\s+(?:with|about)|calendar|appointment\s+(?:with|for)|"
         r"rsvp\s+(?:to|for)|attend(?:ing)?)\b[:\s-]*([^.!?\n]{1,180})"
     ),
+    "web_task": re.compile(
+        r"((?i:book|reserve|order|purchase|buy|check\s+the\s+price\s+of|"
+        r"fill\s+(?:out|in)|sign\s+(?:me\s+)?up\s+for|apply\s+(?:to|for)|"
+        r"find|search)\b[^.!?\n]{1,170})"
+    ),
     "goal": re.compile(
         r"(?i)\b(?:goal\s+is(?:\s+to)?|plan(?:ning)?\s+to|aim(?:ing)?\s+to|want\s+to|"
         r"objective\s+is(?:\s+to)?)\b[:\s-]*([^.!?\n]{1,180})"
@@ -54,6 +59,7 @@ _BOUNDED_DEFAULT = {
     "contact": "Follow up on the captured contact",
     "event": "Prepare for the captured event",
     "goal": "Advance the captured goal",
+    "web_task": "Complete the captured web task",
 }
 
 _CREDENTIAL_PATTERNS = (
@@ -77,9 +83,10 @@ def operational_entity(text: str, category: str) -> str:
     """
 
     named = entity(text)
-    if named != "the identified opportunity":
+    # A web task is the whole bounded command, not a single extracted name.
+    if named != "the identified opportunity" and category != "web_task":
         return named
-    if category not in {"todo", "event", "contact", "goal"}:
+    if category not in _ACTION_MARKERS:
         return named
     clean = " ".join(text.split())
     clean = _FILLER.sub("", clean)

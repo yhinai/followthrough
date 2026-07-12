@@ -45,3 +45,10 @@ def test_contact_keeps_bounded_clause_and_strips_filler() -> None:
 def test_contact_without_marker_never_copies_raw_ambient_text() -> None:
     raw = "Um if I run out of message you say"
     assert operational_entity(raw, "contact") == "Follow up on the captured contact"
+
+
+def test_web_task_keeps_the_full_bounded_command() -> None:
+    text = "Book the cheapest flight from CDG to NRT on Saturday. Then we chatted about lunch."
+    assert operational_entity(text, "web_task") == (
+        "Book the cheapest flight from CDG to NRT on Saturday"
+    )
