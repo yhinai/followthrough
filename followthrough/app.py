@@ -43,6 +43,7 @@ from .models import (
     SignalIn,
     TaskControlIn,
     TranscriptEventIn,
+    TranscriptPartialIn,
 )
 from .relevance import (
     Category,
@@ -470,6 +471,26 @@ def create_app(config: Settings = settings) -> FastAPI:
                 "status": "archived",
                 "classification": archived["classification"],
             }
+        # Announce before the operations-DB write: if record_relevance fails,
+        # the retry takes the created=False path and would never publish, so
+        # dashboards would permanently miss a row that is durably archived.
+        await bus.publish(
+            "transcript_archived",
+            {
+                "event_id": payload.event_id,
+                "device_id": payload.device_id,
+                "source": payload.source,
+                "occurred_at": archived["occurred_at"],
+                "received_at": archived["received_at"],
+                "text": transcript,
+                # A segment folded into an aggregate is archived but never
+                # dispatched itself; the live event must not claim otherwise.
+                "relevant": relevance.dispatch_allowed and not suppress_dispatch,
+                "classification": "aggregate_component" if suppress_dispatch else classification.kind,
+                "aggregated": bool(payload.metadata.get("aggregated")),
+                "utterance_id": payload.metadata.get("utterance_id"),
+            },
+        )
         store.record_relevance(archived["id"], payload.event_id, relevance.to_dict())
         if suppress_dispatch:
             archive_store.set_classification(
@@ -617,6 +638,62 @@ def create_app(config: Settings = settings) -> FastAPI:
             }
         return result
 
+    @application.post("/api/v1/transcripts/partial", status_code=202)
+    async def transcript_partial(payload: TranscriptPartialIn) -> dict[str, object]:
+        """Fan an in-flight ASR hypothesis out to live dashboards.
+
+        Partials are ephemeral by design: they never touch the archive, the
+        relevance gate, or Hermes. The finalized utterance arrives separately
+        through the normal transcript ingestion path.
+        """
+        if not payload.consent:
+            raise HTTPException(status_code=400, detail="capture consent flag is required")
+        if len(payload.text.encode()) > config.max_transcript_bytes:
+            raise HTTPException(status_code=413, detail="transcript exceeds configured limit")
+        if not controls.operation_allowed(Capability.LISTENING):
+            raise HTTPException(status_code=503, detail="listening is paused")
+        await bus.publish(
+            "transcript_partial",
+            {
+                "utterance_id": payload.utterance_id,
+                "device_id": payload.device_id,
+                "source": payload.source,
+                "seq": payload.seq,
+                "text": payload.text,
+                "occurred_at": _utc(payload.occurred_at),
+                "received_at": _utc(),
+            },
+        )
+        return {
+            "utterance_id": payload.utterance_id,
+            "seq": payload.seq,
+            "status": "streamed",
+            "archived": False,
+        }
+
+    @application.get("/api/transcript")
+    async def transcript_feed(
+        limit: int = Query(default=50, ge=1, le=200),
+        before: str | None = Query(default=None, max_length=64),
+        before_id: str | None = Query(default=None, max_length=64),
+    ) -> list[dict[str, object]]:
+        entries: list[dict[str, object]] = []
+        for event in archive_store.recent_transcripts(limit, before, before_id):
+            entries.append(
+                {
+                    "event_id": event["event_id"],
+                    "archive_id": event["id"],
+                    "device_id": event["device_id"],
+                    "source": event["source"],
+                    "occurred_at": event["occurred_at"],
+                    "received_at": event["received_at"],
+                    "text": event["transcript_bytes"].decode("utf-8", errors="replace"),
+                    "relevant": bool(event["relevant"]),
+                    "classification": event["classification"],
+                }
+            )
+        return entries
+
     @application.get("/api/v1/audio/{event_id}/status")
     async def audio_status(event_id: str) -> dict[str, object]:
         archived = archive_store.by_event(event_id)
@@ -694,6 +771,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             metadata={
                 "email": str(payload.email) if payload.email else None,
                 "allow_owner_report": payload.allow_owner_report,
+                **({"utterance_id": payload.utterance_id} if payload.utterance_id else {}),
             },
         )
         if payload.email:

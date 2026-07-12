@@ -2,10 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[character]);
 let browserListening = false;
 let recognition = null;
-let lastActivityId = null;
 let toastTimer = null;
-let latestActivity = [];
-let actionableOnly = false;
 const htmlCache = new Map();
 
 // Only touch the DOM when a section's markup actually changed, so the 1.5s poll
@@ -48,12 +45,12 @@ const timeAgo = (value) => {
 };
 const label = (value) => String(value || "signal").replaceAll("_", " ");
 
-async function sendSignal(text) {
+async function sendSignal(text, utteranceId = null) {
   if (!text.trim()) return;
   $("#submit").disabled = true;
   $("#submit").textContent = "Archiving and triaging…";
   try {
-    const result = await jsonApi("/api/signals", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text, source:browserListening ? "voice" : "demo", consent:true})});
+    const result = await jsonApi("/api/signals", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text, source:browserListening ? "voice" : "demo", consent:true, ...(utteranceId ? {utterance_id: utteranceId} : {})})});
     if (result.status === "archived") showToast("Archived safely — no action was needed.");
     else showToast("Signal received — Hermes is triaging it now.", "success");
     $("#input").value = "";
@@ -68,31 +65,179 @@ async function setMode(mode, resumeParked = false) {
   await load();
 }
 
+// Interim ASR hypotheses stream to the server (and every open dashboard)
+// word by word; only the finalized utterance goes through signal ingestion.
+let micUtteranceId = null;
+let micUtteranceSeq = 0;
+
+const newUtteranceId = () => (crypto.randomUUID ? crypto.randomUUID() : `utt-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
+
+function streamPartial(utteranceId, seq, text) {
+  fetch("/api/v1/transcripts/partial", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({utterance_id: utteranceId, device_id: "dashboard", source: "voice", seq, text, consent: true}),
+  }).catch(() => {});
+}
+
 function setBrowserMic(on) {
   browserListening = on;
   $("#listen").innerHTML = `<span class="mic-dot"></span>${on ? "Stop browser mic" : "Browser mic"}`;
   $("#listen").setAttribute("aria-pressed", String(on));
   if (on && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new Recognition(); recognition.continuous = true; recognition.interimResults = false;
-    recognition.onresult = (event) => sendSignal(event.results[event.results.length - 1][0].transcript);
-    recognition.onend = () => { if (browserListening) try { recognition.start(); } catch (_) {} };
+    recognition = new Recognition(); recognition.continuous = true; recognition.interimResults = true;
+    recognition.onresult = (event) => {
+      // Walk every updated result: Chrome can bundle a finalized phrase with
+      // the next phrase's first interim in one event, and looking only at the
+      // last result would drop the final forever.
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const text = result[0].transcript.trim();
+        if (!text) continue;
+        if (result.isFinal) {
+          const finished = micUtteranceId;
+          micUtteranceId = null; micUtteranceSeq = 0;
+          sendSignal(text, finished);
+        } else {
+          if (!micUtteranceId) micUtteranceId = newUtteranceId();
+          streamPartial(micUtteranceId, micUtteranceSeq++, text);
+        }
+      }
+    };
+    recognition.onend = () => {
+      // The session died without finalizing the in-flight interim; the next
+      // sentence must not stream under the dead utterance's identity.
+      micUtteranceId = null; micUtteranceSeq = 0;
+      if (browserListening) try { recognition.start(); } catch (_) {}
+    };
     recognition.start();
-  } else if (!on && recognition) { recognition.stop(); recognition = null; }
+  } else if (!on && recognition) { recognition.stop(); recognition = null; micUtteranceId = null; micUtteranceSeq = 0; }
 }
 
-function activityCard(item, index) {
-  const fresh = index === 0 && item.event_id !== lastActivityId ? " fresh" : "";
-  const disposition = item.relevant ? "actionable" : "observed";
-  return `<div class="activity-item${fresh}"><div class="source-icon ${escapeHtml(item.source)}">${item.source === "phone" || item.source === "omi" ? "◉" : "↗"}</div><div class="activity-copy"><div><span>${escapeHtml(label(item.classification))}</span>${timeEl(item.received_at)}</div><p>${escapeHtml(item.text)}</p><small class="${disposition}">${item.relevant ? "Promoted to Hermes" : "Archived · no action"}</small></div></div>`;
+// ---- Transcript tab ---------------------------------------------------------
+// Finalized utterances render newest-first with Pacific-time stamps; in-flight
+// hypotheses stream into a live area above them and settle into entries when
+// the archived event arrives over SSE.
+const TRANSCRIPT_PAGE = 50;
+const PT_FORMAT = new Intl.DateTimeFormat("en-US", {timeZone: "America/Los_Angeles", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true});
+const ptStamp = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : `${PT_FORMAT.format(date)} PT`;
+};
+
+let transcriptEntries = [];
+const transcriptIds = new Set();
+let transcriptCursor = null;
+let transcriptLoaded = false;
+let transcriptExhausted = false;
+let transcriptLoading = false;
+let freshTranscriptId = null;
+const livePartials = new Map();
+// Utterances that already finalized: a straggler partial that lost the race
+// against the final POST must not resurrect a ghost "hearing now" bubble.
+const finishedUtterances = new Map();
+// Archived events that arrive while the initial page-1 fetch is in flight are
+// buffered and merged afterwards instead of being dropped.
+let pendingArchived = [];
+const LIVE_PARTIAL_CAP = 12;
+const LIVE_PARTIAL_TEXT_CAP = 2000;
+let liveRenderTimer = null;
+
+function transcriptRow(entry) {
+  const fresh = entry.event_id === freshTranscriptId ? " fresh" : "";
+  const spokenAt = entry.occurred_at || entry.received_at || "";
+  return `<article class="transcript-row${fresh}"><header><span class="transcript-source">${escapeHtml(label(entry.source))}</span><time datetime="${escapeHtml(spokenAt)}">${escapeHtml(ptStamp(spokenAt))}</time>${entry.relevant ? '<span class="transcript-flag">Promoted to Hermes</span>' : ""}</header><p>${escapeHtml(entry.text)}</p></article>`;
 }
 
-function renderActivity() {
-  const visible = actionableOnly ? latestActivity.filter((item) => item.relevant) : latestActivity;
-  setHTML("#activity", visible.length
-    ? visible.slice(0, 9).map(activityCard).join("")
-    : `<div class="empty-state"><span class="empty-orbit"></span><strong>${actionableOnly ? "No actionable signals" : "Listening for a signal"}</strong><small>${actionableOnly ? "Everything is quiet for now." : "Your phone can stay in your pocket."}</small></div>`);
-  refreshTimes();
+function renderTranscript() {
+  setHTML("#transcriptEntries", transcriptEntries.length
+    ? transcriptEntries.map(transcriptRow).join("")
+    : '<div class="empty-state"><span class="empty-orbit"></span><strong>Nothing transcribed yet</strong><small>Speak near the phone or use the browser mic and words will land here live.</small></div>');
+  $("#transcriptMore").hidden = transcriptExhausted || !transcriptEntries.length;
+}
+
+function renderTranscriptLive() {
+  setHTML("#transcriptLive", [...livePartials.values()]
+    .sort((a, b) => b.localAt - a.localAt)
+    .slice(0, 6)
+    .map((partial) => `<div class="transcript-partial"><span class="live-dot"></span><div><small>${escapeHtml(label(partial.source))} · hearing now</small><p>${escapeHtml(String(partial.text).slice(0, LIVE_PARTIAL_TEXT_CAP))}</p></div></div>`)
+    .join(""));
+}
+
+// Partial events can burst several times a second; coalesce repaints so a
+// flood costs one render per frame-ish window instead of one per event.
+function scheduleLiveRender() {
+  if (liveRenderTimer) return;
+  liveRenderTimer = setTimeout(() => { liveRenderTimer = null; renderTranscriptLive(); }, 80);
+}
+
+// Insert while preserving the strict newest-first invariant even when SSE
+// arrival order and head refreshes interleave.
+function insertTranscriptEntry(entry, {fresh = false} = {}) {
+  if (!entry || !entry.event_id || transcriptIds.has(entry.event_id)) return;
+  transcriptIds.add(entry.event_id);
+  transcriptEntries.push(entry);
+  transcriptEntries.sort((a, b) => String(b.received_at ?? "").localeCompare(String(a.received_at ?? "")));
+  if (fresh) freshTranscriptId = entry.event_id;
+  renderTranscript();
+}
+
+// SSE delivery is lossy (reconnects, bounded queues): re-pull page 1 and merge
+// anything missed. Dedupe by event_id makes this idempotent and cheap.
+async function refreshTranscriptHead() {
+  if (!transcriptLoaded) return;
+  try {
+    const batch = await jsonApi(`/api/transcript?limit=${TRANSCRIPT_PAGE}`);
+    for (const entry of batch) insertTranscriptEntry(entry);
+  } catch (_) { /* the next reconnect or tab open retries */ }
+}
+
+async function loadTranscript(reset = false) {
+  if (transcriptLoading) return;
+  transcriptLoading = true;
+  try {
+    const params = new URLSearchParams({limit: String(TRANSCRIPT_PAGE)});
+    if (!reset && transcriptCursor) {
+      params.set("before", transcriptCursor.receivedAt);
+      params.set("before_id", transcriptCursor.id);
+    }
+    const batch = await jsonApi(`/api/transcript?${params}`);
+    if (reset) { transcriptEntries = []; transcriptIds.clear(); transcriptCursor = null; transcriptExhausted = false; }
+    for (const entry of batch) {
+      if (transcriptIds.has(entry.event_id)) continue;
+      transcriptIds.add(entry.event_id);
+      transcriptEntries.push(entry);
+    }
+    if (batch.length) transcriptCursor = {
+      receivedAt: batch[batch.length - 1].received_at,
+      id: batch[batch.length - 1].archive_id,
+    };
+    if (batch.length < TRANSCRIPT_PAGE) transcriptExhausted = true;
+    transcriptLoaded = true;
+    const buffered = pendingArchived;
+    pendingArchived = [];
+    for (const entry of buffered) insertTranscriptEntry(entry, {fresh: true});
+    renderTranscript();
+  } catch (error) {
+    showToast(`Transcript load failed: ${error.message}`, "error");
+  } finally {
+    transcriptLoading = false;
+  }
+}
+
+function setView(view) {
+  const transcript = view === "transcript";
+  document.body.dataset.view = view;
+  $("#top").hidden = transcript;
+  $("#transcriptView").hidden = !transcript;
+  $("#tabOverview").classList.toggle("active", !transcript);
+  $("#tabOverview").setAttribute("aria-pressed", String(!transcript));
+  $("#tabTranscript").classList.toggle("active", transcript);
+  $("#tabTranscript").setAttribute("aria-pressed", String(transcript));
+  if (transcript) transcriptLoaded ? refreshTranscriptHead() : loadTranscript(true);
+  const hash = transcript ? "#transcript" : "";
+  if (location.hash !== hash) history.replaceState(null, "", hash || location.pathname + location.search);
 }
 
 function jobRow(job) {
@@ -396,9 +541,6 @@ async function load() {
     $("#mArchive").textContent = metrics.total ?? 0;
     $("#mJobs").textContent = jobs.length;
     $("#mDone").textContent = metrics.completed ?? 0;
-    latestActivity = activity;
-    renderActivity();
-    if (activity.length) lastActivityId = activity[0].event_id;
     setHTML("#jobs", jobs.length ? jobs.slice(0,12).map(jobRow).join("") : '<div class="empty-state compact"><strong>No delegated work yet</strong><small>Qualified signals will become traceable work here.</small></div>');
     $("#jobSummary").textContent = `Live · ${jobs.filter((job) => job.state === "completed").length} completed · ${jobs.filter((job) => !["completed","cancelled","dead_letter","failed"].includes(job.state)).length} active`;
     renderCurrentJob(jobs, activity);
@@ -417,12 +559,10 @@ $("#submit").onclick = () => sendSignal($("#input").value);
 $("#listen").onclick = () => setBrowserMic(!browserListening);
 $("#pause").onclick = () => setMode(document.body.dataset.mode === "running" ? "paused" : "running", true);
 $("#refreshDesktop").onclick = () => load();
-$("#feedFilter").onclick = () => {
-  actionableOnly = !actionableOnly;
-  $("#feedFilter").setAttribute("aria-pressed", String(actionableOnly));
-  $("#feedFilter").textContent = actionableOnly ? "Show all signals" : "Show actionable only";
-  renderActivity();
-};
+$("#tabOverview").onclick = () => setView("overview");
+$("#tabTranscript").onclick = () => setView("transcript");
+$("#openTranscript").onclick = () => setView("transcript");
+$("#transcriptMore").onclick = () => loadTranscript();
 document.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
@@ -443,3 +583,58 @@ const liveEvents = new EventSource("/api/events");
 liveEvents.addEventListener("desktop_action", () => load());
 liveEvents.addEventListener("computer_use_progress", () => load());
 liveEvents.addEventListener("computer_use_completed", () => load());
+// Each (re)connect opens with a "ready" frame: refresh page 1 so anything
+// published while disconnected (or shed by the bounded queue) is recovered.
+liveEvents.addEventListener("ready", () => refreshTranscriptHead());
+liveEvents.addEventListener("transcript_partial", (event) => {
+  const {payload} = JSON.parse(event.data);
+  if (finishedUtterances.has(payload.utterance_id)) return;
+  const current = livePartials.get(payload.utterance_id);
+  // Interim hypotheses can arrive out of order; an older frame never
+  // overwrites a newer one within the same utterance.
+  if (current && current.seq > payload.seq) return;
+  if (!current && livePartials.size >= LIVE_PARTIAL_CAP) {
+    // Bound the map: shed the stalest bubble rather than growing forever.
+    let stalest = null;
+    for (const [key, value] of livePartials) if (!stalest || value.localAt < livePartials.get(stalest).localAt) stalest = key;
+    livePartials.delete(stalest);
+  }
+  livePartials.set(payload.utterance_id, {...payload, localAt: Date.now()});
+  scheduleLiveRender();
+});
+liveEvents.addEventListener("transcript_archived", (event) => {
+  const {payload} = JSON.parse(event.data);
+  if (payload.utterance_id) {
+    finishedUtterances.set(payload.utterance_id, Date.now());
+    if (livePartials.delete(payload.utterance_id)) scheduleLiveRender();
+  }
+  if (payload.aggregated) return;
+  if (!transcriptLoaded) { pendingArchived.push(payload); return; }
+  insertTranscriptEntry(payload, {fresh: true});
+});
+// A hypothesis whose utterance never finalizes (mic cut out, device offline)
+// decays instead of pulsing forever; finished-utterance tombstones expire too.
+setInterval(() => {
+  let changed = false;
+  for (const [key, partial] of livePartials) {
+    if (Date.now() - partial.localAt > 15000) { livePartials.delete(key); changed = true; }
+  }
+  for (const [key, at] of finishedUtterances) {
+    if (Date.now() - at > 60000) finishedUtterances.delete(key);
+  }
+  if (changed) scheduleLiveRender();
+}, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshTranscriptHead(); });
+// Reaching the bottom of the transcript pulls the next (older) page without a click.
+new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting) && transcriptLoaded && !transcriptExhausted) loadTranscript();
+}).observe($("#transcriptMore"));
+// The brand link and manual hash edits navigate views too, so the URL and the
+// visible view never disagree.
+document.querySelector(".brand").addEventListener("click", (event) => {
+  event.preventDefault();
+  setView("overview");
+  window.scrollTo({top: 0});
+});
+window.addEventListener("hashchange", () => setView(location.hash === "#transcript" ? "transcript" : "overview"));
+setView(location.hash === "#transcript" ? "transcript" : "overview");

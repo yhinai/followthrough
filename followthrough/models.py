@@ -20,6 +20,9 @@ class SignalIn(BaseModel):
     email: EmailStr | None = None
     consent: bool = False
     allow_owner_report: bool = True
+    # Links the archived event back to the live partial stream that preceded
+    # it, so the dashboard can replace the in-flight bubble with the entry.
+    utterance_id: str | None = Field(default=None, min_length=8, max_length=200)
 
 
 class ComputerUseIn(BaseModel):
@@ -78,10 +81,27 @@ class TranscriptEventIn(BaseModel):
     event_id: str = Field(min_length=8, max_length=200)
     device_id: str = Field(min_length=1, max_length=100)
     text: str = Field(min_length=1, max_length=65_536)
-    source: Literal["omi", "phone", "wearable", "web", "api", "demo"] = "omi"
+    source: Literal["omi", "phone", "wearable", "web", "voice", "api", "demo"] = "omi"
     occurred_at: datetime | None = None
     consent: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TranscriptPartialIn(BaseModel):
+    """An in-flight ASR hypothesis: streamed to dashboards, never archived.
+
+    `text` is the full hypothesis so far (interim ASR revises earlier words),
+    and `seq` orders hypotheses within one utterance so late-arriving older
+    frames never overwrite newer ones.
+    """
+
+    utterance_id: str = Field(min_length=8, max_length=200)
+    device_id: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=65_536)
+    source: Literal["omi", "phone", "wearable", "web", "voice", "api", "demo"] = "phone"
+    seq: int = Field(default=0, ge=0)
+    occurred_at: datetime | None = None
+    consent: bool = True
 
 
 class AudioChunkReceipt(BaseModel):

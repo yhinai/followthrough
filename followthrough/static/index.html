@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f5ef">
   <title>Followthrough · Ambient operator</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-11">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-12">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -14,6 +14,10 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
       <span><strong>Followthrough</strong><small>Ambient operator</small></span>
     </a>
+    <nav class="view-tabs" aria-label="Dashboard views">
+      <button id="tabOverview" class="view-tab active" type="button" aria-pressed="true">Overview</button>
+      <button id="tabTranscript" class="view-tab" type="button" aria-pressed="false">Transcript</button>
+    </nav>
     <div class="header-status command-bar">
       <span id="lastSync" class="sync">Connecting…</span>
       <button id="pause" class="quiet-button" type="button" aria-pressed="false"><span class="pause-icon"></span>Pause</button>
@@ -105,8 +109,8 @@
 
       <article class="panel feed-panel">
         <div class="panel-head"><div><p class="kicker">Signal feed</p><h2>Recent moments</h2></div><span class="live-chip"><i></i>Live</span></div>
-        <div class="feed-tools"><p>Only consented, relevant context appears here.</p><button id="feedFilter" class="text-button" type="button" aria-pressed="false">Show actionable only</button></div>
-        <div id="activity" class="activity-stream" aria-live="polite"><div class="empty-state"><span class="empty-orbit"></span><strong>Listening for a signal</strong><small>Your phone can stay in your pocket.</small></div></div>
+        <div class="feed-tools"><p>The full word-by-word feed now lives in its own tab.</p><button id="openTranscript" class="text-button" type="button">Open the live transcript →</button></div>
+        <div class="transcript-pointer"><span class="empty-orbit"></span><strong>Transcript moved</strong><small>Watch every word stream in live, newest first, with Pacific-time stamps.</small></div>
       </article>
     </section>
 
@@ -129,7 +133,22 @@
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   </main>
 
+  <main id="transcriptView" class="transcript-view" hidden>
+    <section class="panel transcript-panel">
+      <div class="panel-head">
+        <div><p class="kicker">Live transcript</p><h2>Everything heard, as it's said</h2></div>
+        <span class="live-chip"><i></i>Live</span>
+      </div>
+      <p class="transcript-note">Newest at the top · timestamps in Pacific Time · in-flight speech streams word by word, then settles into the archive entry below.</p>
+      <div id="transcriptLive" class="transcript-live" aria-live="polite"></div>
+      <div id="transcriptEntries" class="transcript-entries">
+        <div class="empty-state"><span class="empty-orbit"></span><strong>Nothing transcribed yet</strong><small>Speak near the phone or use the browser mic and words will land here live.</small></div>
+      </div>
+      <button id="transcriptMore" class="secondary transcript-more" type="button" hidden>Load older</button>
+    </section>
+  </main>
+
   <footer><span>Followthrough</span><span>Hermes · NVIDIA Spark · Cloudflare edge</span><span>Built for conversations worth continuing.</span></footer>
-  <script src="/static/app.js?v=20260712-11"></script>
+  <script src="/static/app.js?v=20260712-12"></script>
 </body>
 </html>

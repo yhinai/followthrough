@@ -94,6 +94,31 @@ class ArchiveStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def recent_transcripts(
+        self, limit: int = 50, before: str | None = None, before_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Spoken/typed events newest-first, keyset-paginated by received_at.
+
+        Synthetic aggregate events are excluded: their text duplicates the
+        component segments that are already in the list, so showing both would
+        render the same words twice in the transcript.
+        """
+        query = (
+            "SELECT * FROM archive_events WHERE classification != 'audio_only' "
+            "AND COALESCE(json_extract(metadata_json, '$.aggregated'), 0) != 1"
+        )
+        parameters: list[Any] = []
+        if before and before_id:
+            query += " AND (received_at < ? OR (received_at = ? AND id < ?))"
+            parameters.extend((before, before, before_id))
+        elif before:
+            query += " AND received_at < ?"
+            parameters.append(before)
+        query += " ORDER BY received_at DESC, id DESC LIMIT ?"
+        parameters.append(max(1, min(limit, 200)))
+        rows = self.db.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
     def link_run(self, archive_id: str, run_id: str) -> None:
         with self.lock:
             self.db.execute("UPDATE archive_events SET run_id=? WHERE id=?", (run_id, archive_id))
