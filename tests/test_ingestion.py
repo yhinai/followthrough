@@ -69,6 +69,41 @@ def test_actionable_replay_creates_one_run(configured_settings) -> None:
     assert app.state.store.get_run(first.json()["run_id"])["status"] == "completed"
 
 
+def test_phone_fragments_are_centrally_aggregated_before_dispatch(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-fragment-action-0001",
+                "device_id": "memo-samsung",
+                "text": "Followthrough, please research",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+        second = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-fragment-subject-0002",
+                "device_id": "memo-samsung",
+                "text": "the GitHub repository PyPA sampleproject",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+    assert first.status_code == 202
+    assert first.json()["status"] == "archived"
+    assert second.status_code == 202
+    assert second.json()["status"] == "queued"
+    assert second.json()["aggregate_event_id"].startswith("adb-omi:aggregate:")
+    assert second.json()["original_event_id"] == "memo-fragment-subject-0002"
+    assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+
+
 def test_payload_limits_fail_before_persistence(configured_settings) -> None:
     settings, _, device_token = configured_settings
     settings.max_transcript_bytes = 64

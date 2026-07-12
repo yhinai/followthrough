@@ -14,6 +14,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .adb_bridge import Transcript, TranscriptAggregator
 from .archive import ArchiveIntegrityError, ArchiveVault
 from .archive_store import ArchiveStore
 from .bus import bus
@@ -236,6 +237,7 @@ def create_app(config: Settings = settings) -> FastAPI:
     application.state.controls = controls
     application.state.improvements = improvements
     application.state.background_tasks = set()
+    application.state.transcript_aggregators = {}
     static = Path(__file__).parent / "static"
     if static.is_dir():
         application.mount("/static", StaticFiles(directory=static), name="static")
@@ -340,7 +342,13 @@ def create_app(config: Settings = settings) -> FastAPI:
         await bus.publish("job_queued", {"event_id": event_id, "run_id": run_id, "job_id": job["id"]})
         return {"status": "queued", "run_id": run_id, "job_id": job["id"], "orchestrator": "hermes-kanban"}
 
-    async def ingest(payload: TranscriptEventIn, *, speaker: SpeakerContext, defer_actions: bool = False) -> dict[str, object]:
+    async def ingest(
+        payload: TranscriptEventIn,
+        *,
+        speaker: SpeakerContext,
+        defer_actions: bool = False,
+        suppress_dispatch: bool = False,
+    ) -> dict[str, object]:
         transcript = payload.text.strip()
         if len(transcript.encode()) > config.max_transcript_bytes:
             raise HTTPException(status_code=413, detail="transcript exceeds configured limit")
@@ -380,6 +388,21 @@ def create_app(config: Settings = settings) -> FastAPI:
                 return {"event_id": payload.event_id, "archive_id": archived["id"], "created": False, "status": existing_run["status"] if existing_run else "accepted", "run_id": archived["run_id"]}
             return {"event_id": payload.event_id, "archive_id": archived["id"], "created": False, "status": "archived", "classification": archived["classification"]}
         store.record_relevance(archived["id"], payload.event_id, relevance.to_dict())
+        if suppress_dispatch:
+            await bus.publish(
+                "archive_only",
+                {"event_id": payload.event_id, "classification": classification.kind},
+            )
+            return {
+                "event_id": payload.event_id,
+                "archive_id": archived["id"],
+                "created": True,
+                "status": "archived",
+                "classification": classification.__dict__,
+                "relevance": relevance.to_dict(),
+                "operational_memory": False,
+                "dispatch_suppressed_for_aggregate": True,
+            }
         if not relevance.dispatch_allowed:
             await bus.publish("archive_only", {"event_id": payload.event_id, "classification": classification.kind})
             return {"event_id": payload.event_id, "archive_id": archived["id"], "created": True, "status": "archived", "classification": classification.__dict__, "relevance": relevance.to_dict(), "operational_memory": False}
@@ -442,7 +465,45 @@ def create_app(config: Settings = settings) -> FastAPI:
         principal = require_device(authorization, x_followthrough_token)
         if not payload.consent:
             raise HTTPException(status_code=400, detail="capture consent flag is required")
-        return await ingest(payload, speaker=SpeakerContext.native_owner(principal), defer_actions=True)
+        speaker = SpeakerContext.native_owner(principal)
+        aggregate = None
+        aggregator = None
+        if payload.source in {"phone", "wearable"} and not payload.metadata.get("aggregated"):
+            aggregator = application.state.transcript_aggregators.setdefault(
+                payload.device_id, TranscriptAggregator()
+            )
+            aggregate = aggregator.add(
+                Transcript(payload.event_id, _utc(payload.occurred_at), payload.text)
+            )
+        result = await ingest(
+            payload,
+            speaker=speaker,
+            defer_actions=True,
+            suppress_dispatch=aggregate is not None,
+        )
+        if aggregate and aggregator:
+            aggregate_payload = TranscriptEventIn(
+                event_id=aggregate.event_id,
+                device_id=payload.device_id,
+                text=aggregate.text,
+                source=payload.source,
+                occurred_at=datetime.fromisoformat(aggregate.occurred_at),
+                consent=True,
+                metadata={
+                    **payload.metadata,
+                    "aggregated": True,
+                    "aggregate_window_seconds": aggregator.window_seconds,
+                },
+            )
+            aggregate_result = await ingest(
+                aggregate_payload, speaker=speaker, defer_actions=True
+            )
+            return {
+                **aggregate_result,
+                "aggregate_event_id": aggregate.event_id,
+                "original_event_id": payload.event_id,
+            }
+        return result
 
     @application.get("/api/v1/audio/{event_id}/status")
     async def audio_status(
