@@ -524,15 +524,17 @@ class Store:
     def kanban_pending_notifications(self, *, limit: int) -> list[dict[str, Any]]:
         with self.lock:
             rows = self.db.execute(
-                "SELECT h.*,COALESCE(NULLIF(c.latest_answer,''),NULLIF(r.summary,''),h.latest_outcome,'Completed') AS result_summary,"
+                "SELECT h.*,COALESCE(NULLIF(c.latest_answer,''),NULLIF(c.error,''),NULLIF(r.summary,''),h.latest_outcome,'Completed') AS result_summary,"
                 "c.step_count AS computer_steps,c.created_at AS computer_started_at,"
-                "c.finished_at AS computer_finished_at,c.agent_view_url AS computer_replay_url "
+                "c.finished_at AS computer_finished_at,c.agent_view_url AS computer_replay_url,"
+                "c.state AS computer_state "
                 "FROM hermes_jobs h LEFT JOIN runs r ON r.id=h.run_id "
                 "LEFT JOIN computer_use_sessions c ON c.source_event_id=h.event_id "
                 "WHERE h.task_id IS NOT NULL AND h.discord_chat_id IS NOT NULL "
                 "AND h.notification_state NOT IN ('delivered','failed') AND h.notification_attempts<5 "
                 "AND h.state='completed' "
-                "AND (h.category!='web_task' OR (c.state='completed' AND NULLIF(c.latest_answer,'') IS NOT NULL)) "
+                "AND (h.category!='web_task' OR (c.state='completed' AND NULLIF(c.latest_answer,'') IS NOT NULL) "
+                "OR c.state IN ('failed','timed_out','interrupted','configuration_required')) "
                 "ORDER BY h.updated_at LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -555,6 +557,7 @@ class Store:
                 "computer_started_at": row["computer_started_at"],
                 "computer_finished_at": row["computer_finished_at"],
                 "computer_replay_url": row["computer_replay_url"],
+                "computer_state": row["computer_state"],
             }
             for row in rows
         ]

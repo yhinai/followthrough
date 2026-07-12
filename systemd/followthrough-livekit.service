@@ -1,0 +1,26 @@
+[Unit]
+Description=Followthrough LiveKit speech worker on Spark
+After=network-online.target followthrough.service
+Wants=network-online.target
+Requires=followthrough.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alhinai/Projects/followthrough
+EnvironmentFile=/home/alhinai/.config/followthrough/livekit.env
+Environment=FOLLOWTHROUGH_LIVEKIT_API_URL=http://127.0.0.1:18765
+Environment=PATH=/home/alhinai/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/alhinai/Projects/followthrough/.venv/bin/python -m followthrough.livekit_agent start
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target

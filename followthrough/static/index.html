@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#f4f5ef">
   <title>Followthrough · Ambient operator</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23f4f5ef'/%3E%3Cpath d='M18 23h28M18 34h18' stroke='%234f8f24' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-15">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-16">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
   <header class="topbar">
     <a class="brand" href="#top" aria-label="Followthrough home">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
-      <span><strong>Followthrough</strong><small>Ambient operator</small></span>
+      <span><strong>Followthrough</strong><small>Memo ambient companion</small></span>
     </a>
     <nav class="view-tabs" role="tablist" aria-label="Dashboard views">
       <button id="tabOverview" class="view-tab active" type="button" role="tab" aria-selected="true" aria-controls="top">Overview</button>
@@ -27,23 +27,14 @@
   </header>
 
   <main id="top" role="tabpanel" aria-labelledby="tabOverview">
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow"><span></span>Ambient intent → verified computer use</p>
-        <h1>Turn conversation<br>into <em>momentum.</em></h1>
-        <p class="lede">Memo transcribes your day. Say “Memo” for immediate action; useful ambient signals are quietly organized. H Company works the web, Hermes orchestrates, and Followthrough brings the verified result back.</p>
-        <div class="trust-row" aria-label="Privacy and infrastructure">
-          <span><i class="check">✓</i>Complete local archive</span><span><i class="check">✓</i>Local on Spark</span><span><i class="check">✓</i>Approval before external writes</span>
-        </div>
-      </div>
-      <div class="ambient-status" aria-label="Listening status">
-        <div class="radar"><span class="radar-ring r1"></span><span class="radar-ring r2"></span><span class="radar-ring r3"></span><span class="radar-sweep"></span><div class="core"><div class="wave"><i></i><i></i><i></i><i></i><i></i></div></div></div>
-        <div class="ambient-copy"><span class="status-dot"></span><div><strong>Listening quietly</strong><small id="modeLabel">RUNNING · LIVE</small></div></div>
-      </div>
+    <section class="listening-origin" aria-labelledby="listeningTitle">
+      <div class="listening-device"><span class="phone-glyph" aria-hidden="true"><i></i></span><div><small>Memo · Samsung Flip</small><strong id="listeningTitle">Listening quietly</strong></div></div>
+      <div class="listening-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="listening-heard"><small>Hearing now</small><strong id="overviewLiveText">Waiting for speech…</strong></div>
+      <span id="connectionState" class="connection-state connecting"><i></i>Connecting</span>
     </section>
-
     <section class="overview" aria-label="System overview">
-      <div class="metric"><span>Signals observed</span><strong id="mArchive">0</strong><small>Consent-safe archive</small></div>
+      <div class="metric"><span>Moments captured</span><strong id="mArchive">0</strong><small>Local transcript log</small></div>
       <div class="metric"><span>Work delegated</span><strong id="mJobs">0</strong><small>Durable Hermes jobs</small></div>
       <div class="metric"><span>Outcomes delivered</span><strong id="mDone">0</strong><small>Verified complete</small></div>
       <div class="overview-note"><span class="shield">◇</span><div><strong>Action boundary active</strong><small>Ordinary conversation stays archive-only and never enters operational memory.</small></div></div>
@@ -130,18 +121,18 @@
 
     <details class="demo-drawer panel">
       <summary><span class="console-icon">⌁</span><span><b>Try a signal</b><small>Send a controlled prompt through the same live system</small></span><span class="summary-action">Open console <i>↗</i></span></summary>
-      <div class="demo-body"><label for="input">What should Followthrough notice?</label><textarea id="input" placeholder="Research and safely evaluate a company I just met…"></textarea><div class="capture-actions"><button id="submit" class="primary" type="button">Run through Hermes <span>→</span></button><button id="sample" class="secondary" type="button">Load example</button><button id="listen" class="secondary" type="button"><span class="mic-dot"></span>Browser mic</button><small class="shortcut">⌘ Enter to send · / to focus</small></div></div>
+      <div class="demo-body"><label for="input">What should Followthrough notice?</label><textarea id="input" placeholder="Research and safely evaluate a company I just met…"></textarea><div class="capture-actions"><button id="submit" class="primary" type="button">Run through Hermes <span>→</span></button><button id="sample" class="secondary" type="button">Load example</button><button id="listen" class="secondary livekit-mic" type="button" aria-pressed="false"><span class="mic-dot"></span><span id="micLabel">Web mic</span></button><small id="micStatus" class="mic-status" role="status" aria-live="polite">LiveKit · ready</small><small class="shortcut">⌘ Enter to send · / to focus</small></div><div id="remoteAudio" hidden></div></div>
     </details>
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   </main>
 
   <main id="transcriptView" class="transcript-view" role="tabpanel" aria-labelledby="tabTranscript" hidden>
     <section class="panel transcript-panel">
-      <div class="panel-head">
-        <div><p class="kicker">Live transcript</p><h2>Everything heard, as it's said</h2></div>
-        <span class="live-chip"><i></i>Live</span>
+      <div class="transcript-toolbar">
+        <div><span class="live-chip"><i></i>Live</span><strong>Everything Memo hears</strong></div>
+        <label class="transcript-search"><span class="sr-only">Search transcript</span><input id="transcriptSearch" type="search" placeholder="Search conversation" autocomplete="off"></label>
+        <label class="transcript-filter"><span class="sr-only">Filter transcript</span><select id="transcriptFilter"><option value="all">All speech</option><option value="command">Memo commands</option><option value="promoted">Promoted</option><option value="archived">Archived</option></select></label>
       </div>
-      <p class="transcript-note">Newest at the top · timestamps in Pacific Time · in-flight speech streams word by word, then settles into the archive entry below.</p>
       <div id="transcriptLive" class="transcript-live" aria-live="polite"></div>
       <div id="transcriptEntries" class="transcript-entries">
         <div class="empty-state"><span class="empty-orbit"></span><strong>Nothing transcribed yet</strong><small>Speak near the phone or use the browser mic and words will land here live.</small></div>
@@ -151,9 +142,8 @@
   </main>
 
   <main id="workspaceView" class="workspace-view" role="tabpanel" aria-labelledby="tabWorkspace" hidden>
-    <section class="workspace-hero">
-      <div><p class="eyebrow"><span></span>Memo intelligence workspace</p><h1>The important things,<br><em>already organized.</em></h1><p>Research, commitments, reminders, and events promoted from the ambient log. Edit the plan without touching the original transcript or execution receipt.</p></div>
-      <aside><strong id="workspaceTotal">0</strong><span>important items</span><small>Live from Hermes</small></aside>
+    <section class="workspace-summary" aria-label="Workspace item count">
+      <strong id="workspaceTotal">0</strong><span>important items</span><small>Live from Hermes</small>
     </section>
     <section class="workspace-board" aria-label="Important work grouped by type">
       <article data-group="research"><header><span class="workspace-icon">⌕</span><div><h2>Research</h2><p>Questions, tools, companies, and verified findings</p></div><b id="countResearch">0</b></header><div id="workspaceResearch" class="workspace-stack"></div></article>
@@ -163,7 +153,8 @@
     </section>
   </main>
 
-  <footer><span>Followthrough</span><span>Hermes · NVIDIA Spark · Cloudflare edge</span><span>Built for conversations worth continuing.</span></footer>
-  <script src="/static/app.js?v=20260712-15"></script>
+  <footer><span>Followthrough + Memo</span><span>Hermes · H Company · NVIDIA Spark</span><span>Built for conversations worth continuing.</span></footer>
+  <script src="/static/vendor/livekit-client.umd.js"></script>
+  <script src="/static/app.js?v=20260712-16"></script>
 </body>
 </html>

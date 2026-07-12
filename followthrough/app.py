@@ -38,6 +38,7 @@ from .models import (
     DesktopTypeIn,
     GlobalControlIn,
     InterestWeightIn,
+    LiveKitSessionIn,
     RelevanceCorrectionIn,
     SafeModeIn,
     SignalIn,
@@ -46,6 +47,7 @@ from .models import (
     TranscriptPartialIn,
     WorkspaceItemIn,
 )
+from .livekit_tokens import issue_memo_session_token
 from .relevance import (
     Category,
     CorrectionRecord,
@@ -312,8 +314,8 @@ def create_app(config: Settings = settings) -> FastAPI:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; "
                 "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
-                "connect-src 'self' https://cloudflareinsights.com; img-src 'self' data:; "
-                "media-src 'self'; object-src 'none'; "
+                "connect-src 'self' https://cloudflareinsights.com wss://*.livekit.cloud; "
+                "img-src 'self' data:; media-src 'self' blob:; object-src 'none'; "
                 "base-uri 'none'; frame-ancestors 'none'"
             )
         if request.url.path.startswith("/api/"):
@@ -477,12 +479,20 @@ def create_app(config: Settings = settings) -> FastAPI:
                 )
             if archived.get("run_id"):
                 existing_run = store.get_run(archived["run_id"])
+                existing_job = store.hermes_job_for_run(archived["run_id"])
+                existing_computer = store.computer_session_for_event(payload.event_id)
                 return {
                     "event_id": payload.event_id,
                     "archive_id": archived["id"],
                     "created": False,
                     "status": existing_run["status"] if existing_run else "accepted",
                     "run_id": archived["run_id"],
+                    **({"job_id": existing_job["id"]} if existing_job else {}),
+                    **(
+                        {"computer_use_id": existing_computer["id"]}
+                        if existing_computer
+                        else {}
+                    ),
                 }
             return {
                 "event_id": payload.event_id,
@@ -610,6 +620,36 @@ def create_app(config: Settings = settings) -> FastAPI:
             "orchestrator": orchestrator,
             "job_counts": store.hermes_job_counts(),
             "control_mode": controls.status()["global"]["mode"],
+            "livekit_configured": bool(
+                config.livekit_url and config.livekit_api_key and config.livekit_api_secret
+            ),
+        }
+
+    @application.post("/api/v1/livekit/session")
+    async def livekit_memo_session(payload: LiveKitSessionIn) -> dict[str, str]:
+        if not payload.consent:
+            raise HTTPException(status_code=400, detail="explicit capture consent is required")
+        if not payload.device_id:
+            raise HTTPException(status_code=422, detail="Memo device_id is required")
+        authorize_capture(f"livekit-session:{payload.device_id}", "capture:livekit")
+        try:
+            issued = issue_memo_session_token(
+                server_url=config.livekit_url,
+                api_key=config.livekit_api_key,
+                api_secret=config.livekit_api_secret,
+                agent_name=config.livekit_agent_name,
+                device_id=payload.device_id,
+                surface=payload.surface,
+                response_mode=payload.response_mode,
+                ttl_seconds=config.livekit_token_ttl_seconds,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {
+            "server_url": issued.server_url,
+            "participant_token": issued.participant_token,
+            "room_name": issued.room_name,
+            "participant_identity": issued.participant_identity,
         }
 
     @application.post("/api/v1/transcripts", status_code=202)
@@ -1136,6 +1176,7 @@ def create_app(config: Settings = settings) -> FastAPI:
         # worker summary that could only guess at the live page.
         session = store.computer_session_for_event(job["event_id"])
         state = job["state"]
+        error = job.get("last_error")
         if session:
             if session.get("state") == "completed" and session.get("latest_answer"):
                 summary = session["latest_answer"]
@@ -1144,6 +1185,12 @@ def create_app(config: Settings = settings) -> FastAPI:
                 # in progress rather than speaking the research worker's guess.
                 state = "in_progress"
                 summary = None
+            else:
+                # The typed browser runner owns web-task truth. Never report a
+                # research worker's fallback as success when H failed.
+                state = str(session["state"])
+                summary = None
+                error = session.get("error") or f"H Company session {state}"
         return {
             "job_id": job["id"],
             "run_id": job["run_id"],
@@ -1152,7 +1199,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             "category": job.get("category"),
             "entity": job.get("entity"),
             "summary": summary,
-            "error": job.get("last_error"),
+            "error": error,
             "computer_use": (
                 {
                     "id": session["id"],

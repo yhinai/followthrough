@@ -216,6 +216,37 @@ def test_web_task_discord_waits_for_authoritative_h_answer(tmp_path) -> None:
     assert pending[0]["computer_steps"] == 7
 
 
+def test_failed_web_task_is_available_for_truthful_discord_receipt(tmp_path) -> None:
+    store = Store(tmp_path / "operations.db")
+    run_id = store.create_run("phone", "web_task", "Followthrough signal", "archive-web-failed")
+    job, _ = store.create_hermes_job(
+        job_id="job-web-failed",
+        run_id=run_id,
+        archive_id="archive-web-failed",
+        event_id="event-web-failed",
+        idempotency_key="followthrough:archive-web-failed:research:v3",
+        capsule_path=str(tmp_path / "web-failed.json"),
+        category="web_task",
+        entity="Check a current price",
+        discord_chat_id="12345",
+    )
+    store.mark_hermes_enqueued(job["id"], "task-web-failed")
+    store.sync_hermes_job(job["id"], "completed", summary="Worker claimed success")
+    session = store.create_computer_session(
+        task="Check a current price",
+        agent="h/web-surfer-flash",
+        source_event_id="event-web-failed",
+    )
+    store.update_computer_session(
+        session["id"], state="failed", error="H browser timed out"
+    )
+
+    pending = store.kanban_pending_notifications(limit=1)
+
+    assert pending[0]["result_summary"] == "H browser timed out"
+    assert pending[0]["computer_state"] == "failed"
+
+
 def test_false_positive_can_cancel_only_a_nonrunning_job(tmp_path) -> None:
     store = Store(tmp_path / "operations.db")
     run_id = store.create_run("omi", "todo", "Followthrough signal", "archive-false")

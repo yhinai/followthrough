@@ -9,6 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 load_dotenv(Path.home() / ".config" / "followthrough" / "secrets.env")
+load_dotenv(Path.home() / ".config" / "followthrough" / ".env.local")
+load_dotenv(Path.home() / ".config" / "followthrough" / "livekit.env")
 load_dotenv(Path.home() / ".config" / "hai" / ".env")
 
 class Settings(BaseSettings):
@@ -57,6 +59,11 @@ class Settings(BaseSettings):
     desktop_api_base: str = "http://127.0.0.1:8080"
     desktop_api_token: str = ""
     desktop_action_timeout_seconds: int = 60
+    livekit_url: str = Field("", validation_alias="LIVEKIT_URL")
+    livekit_api_key: str = Field("", validation_alias="LIVEKIT_API_KEY")
+    livekit_api_secret: str = Field("", validation_alias="LIVEKIT_API_SECRET")
+    livekit_agent_name: str = "followthrough"
+    livekit_token_ttl_seconds: int = 21_600
 
     def model_post_init(self, __context: object) -> None:
         self.db_path = Path(self.db_path).expanduser().resolve()

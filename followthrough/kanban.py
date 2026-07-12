@@ -929,6 +929,13 @@ class DurableOrchestrator:
         chat_id = _opaque_id(row.get("discord_chat_id"), name="discord_chat_id")
         entity = str(row.get("entity") or "Completed Followthrough task")[:300]
         summary = _discord_summary(row.get("result_summary"))
+        computer_state = str(row.get("computer_state") or "")
+        computer_failed = computer_state in {
+            "failed",
+            "timed_out",
+            "interrupted",
+            "configuration_required",
+        }
         steps = max(0, int(row.get("computer_steps") or 0))
         duration = None
         if row.get("computer_started_at") and row.get("computer_finished_at"):
@@ -954,8 +961,16 @@ class DurableOrchestrator:
             kind=EffectKind.DISCORD_MESSAGE_SEND,
             trigger_event_id=event_id,
             target=f"discord:{chat_id}",
-            subject="Followthrough · completed",
-            body=f"**{entity}**\n\n{summary}{proof}\n\nHermes receipt: `{task_id}`",
+            subject=(
+                "Followthrough · needs attention"
+                if computer_failed
+                else "Followthrough · completed"
+            ),
+            body=(
+                f"**{entity}**\n\n"
+                f"{'Browser task failed: ' if computer_failed else ''}{summary}{proof}"
+                f"\n\nHermes receipt: `{task_id}`"
+            ),
             owner_only=True,
         )
         record = self.effect_service.submit(

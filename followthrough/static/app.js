@@ -1,7 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[character]);
 let browserListening = false;
-let recognition = null;
+let livekitRoom = null;
 let toastTimer = null;
 const htmlCache = new Map();
 
@@ -36,9 +36,9 @@ async function api(path, options = {}) {
 }
 
 async function jsonApi(path, options = {}) { return (await api(path, options)).json(); }
-async function safeJson(path, fallback) {
+async function safeJson(path, fallback, failures = null) {
   try { return await jsonApi(path); }
-  catch (error) { console.warn(`Panel unavailable: ${path}`, error); return fallback; }
+  catch (error) { console.warn(`Panel unavailable: ${path}`, error); failures?.add(path); return fallback; }
 }
 const timeAgo = (value) => {
   const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
@@ -69,54 +69,62 @@ async function setMode(mode, resumeParked = false) {
   await load();
 }
 
-// Interim ASR hypotheses stream to the server (and every open dashboard)
-// word by word; only the finalized utterance goes through signal ingestion.
-let micUtteranceId = null;
-let micUtteranceSeq = 0;
-
-const newUtteranceId = () => (crypto.randomUUID ? crypto.randomUUID() : `utt-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
-
-function streamPartial(utteranceId, seq, text) {
-  fetch("/api/v1/transcripts/partial", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({utterance_id: utteranceId, device_id: "dashboard", source: "voice", seq, text, consent: true}),
-  }).catch(() => {});
+function setMicUi(state, detail = "") {
+  const active = state === "listening";
+  browserListening = active;
+  $("#listen").disabled = state === "connecting" || state === "stopping";
+  $("#listen").setAttribute("aria-pressed", String(active));
+  $("#listen").dataset.state = state;
+  $("#micLabel").textContent = active ? "Stop web mic" : state === "connecting" ? "Connecting…" : "Web mic";
+  $("#micStatus").textContent = detail || ({listening:"LiveKit · listening", stopping:"LiveKit · stopping", error:"LiveKit · unavailable", ready:"LiveKit · ready"}[state] || "LiveKit");
 }
 
-function setBrowserMic(on) {
-  browserListening = on;
-  $("#listen").innerHTML = `<span class="mic-dot"></span>${on ? "Stop browser mic" : "Browser mic"}`;
-  $("#listen").setAttribute("aria-pressed", String(on));
-  if (on && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
-    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new Recognition(); recognition.continuous = true; recognition.interimResults = true;
-    recognition.onresult = (event) => {
-      // Walk every updated result: Chrome can bundle a finalized phrase with
-      // the next phrase's first interim in one event, and looking only at the
-      // last result would drop the final forever.
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index];
-        const text = result[0].transcript.trim();
-        if (!text) continue;
-        if (result.isFinal) {
-          const finished = micUtteranceId;
-          micUtteranceId = null; micUtteranceSeq = 0;
-          sendSignal(text, finished);
-        } else {
-          if (!micUtteranceId) micUtteranceId = newUtteranceId();
-          streamPartial(micUtteranceId, micUtteranceSeq++, text);
-        }
-      }
-    };
-    recognition.onend = () => {
-      // The session died without finalizing the in-flight interim; the next
-      // sentence must not stream under the dead utterance's identity.
-      micUtteranceId = null; micUtteranceSeq = 0;
-      if (browserListening) try { recognition.start(); } catch (_) {}
-    };
-    recognition.start();
-  } else if (!on && recognition) { recognition.stop(); recognition = null; micUtteranceId = null; micUtteranceSeq = 0; }
+async function stopLiveKitMic() {
+  if (!livekitRoom) { setMicUi("ready"); return; }
+  setMicUi("stopping");
+  try { await livekitRoom.localParticipant.setMicrophoneEnabled(false); }
+  finally { livekitRoom.disconnect(); livekitRoom = null; setMicUi("ready"); }
+}
+
+async function setBrowserMic(on) {
+  if (!on) return stopLiveKitMic();
+  if (!window.LivekitClient?.Room) {
+    setMicUi("error", "LiveKit client failed to load");
+    return showToast("LiveKit client is unavailable. Reload and try again.", "error");
+  }
+  setMicUi("connecting", "LiveKit · requesting microphone");
+  try {
+    const session = await jsonApi("/api/v1/livekit/session", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({device_id:"dashboard-web", surface:"dashboard", consent:true, response_mode:"discord_and_voice"}),
+    });
+    const {Room, RoomEvent, Track} = window.LivekitClient;
+    const room = new Room({adaptiveStream:true, dynacast:true});
+    room.on(RoomEvent.TrackSubscribed, (track) => {
+      if (track.kind !== Track.Kind.Audio) return;
+      const element = track.attach();
+      element.autoplay = true;
+      $("#remoteAudio").appendChild(element);
+      element.play().catch(() => showToast("Tap once to hear the agent response.", "info"));
+    });
+    room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((element) => element.remove()));
+    room.on(RoomEvent.Disconnected, () => {
+      if (livekitRoom !== room) return;
+      livekitRoom = null;
+      setMicUi("error", "LiveKit · disconnected — tap to retry");
+    });
+    await room.connect(session.server_url, session.participant_token);
+    await room.localParticipant.setMicrophoneEnabled(true);
+    livekitRoom = room;
+    setMicUi("listening");
+    showToast("Web microphone is live through Memo.", "success");
+  } catch (error) {
+    if (livekitRoom) livekitRoom.disconnect();
+    livekitRoom = null;
+    setMicUi("error", `LiveKit · ${error.message}`);
+    showToast(`Web microphone failed: ${error.message}`, "error");
+  }
 }
 
 // ---- Transcript tab ---------------------------------------------------------
@@ -147,24 +155,43 @@ let pendingArchived = [];
 const LIVE_PARTIAL_CAP = 12;
 const LIVE_PARTIAL_TEXT_CAP = 2000;
 let liveRenderTimer = null;
+let transcriptQuery = "";
+let transcriptFilter = "all";
+
+function transcriptClass(entry) {
+  if (/^\s*memo\b[\s,.:;!?-]*/i.test(String(entry.text || ""))) return "command";
+  return entry.relevant ? "promoted" : "archived";
+}
 
 function transcriptRow(entry) {
   const fresh = entry.event_id === freshTranscriptId ? " fresh" : "";
   const spokenAt = entry.occurred_at || entry.received_at || "";
-  return `<article class="transcript-row${fresh}"><header><span class="transcript-source">${escapeHtml(label(entry.source))}</span><time datetime="${escapeHtml(spokenAt)}">${escapeHtml(ptStamp(spokenAt))}</time>${entry.relevant ? '<span class="transcript-flag">Promoted to Hermes</span>' : ""}</header><p>${escapeHtml(entry.text)}</p></article>`;
+  const classification = transcriptClass(entry);
+  const classificationLabel = classification === "command" ? "Memo command" : classification === "promoted" ? "Promoted" : "Archived";
+  return `<article class="transcript-row ${classification}${fresh}"><header><span class="transcript-class">${classificationLabel}</span><time datetime="${escapeHtml(spokenAt)}">${escapeHtml(ptStamp(spokenAt))}</time></header><p>${escapeHtml(entry.text)}</p></article>`;
 }
 
 function renderTranscript() {
-  setHTML("#transcriptEntries", transcriptEntries.length
-    ? transcriptEntries.map(transcriptRow).join("")
-    : '<div class="empty-state"><span class="empty-orbit"></span><strong>Nothing transcribed yet</strong><small>Speak near the phone or use the browser mic and words will land here live.</small></div>');
+  const visible = transcriptEntries.filter((entry) => {
+    const matchesType = transcriptFilter === "all" || transcriptClass(entry) === transcriptFilter;
+    const matchesQuery = !transcriptQuery || String(entry.text || "").toLocaleLowerCase().includes(transcriptQuery);
+    return matchesType && matchesQuery;
+  });
+  const empty = transcriptEntries.length
+    ? '<div class="empty-state compact"><strong>No matching moments</strong><small>Try a different search or filter.</small></div>'
+    : '<div class="empty-state"><span class="empty-orbit"></span><strong>Nothing transcribed yet</strong><small>Speak near the phone or use the browser mic and words will land here live.</small></div>';
+  setHTML("#transcriptEntries", visible.length ? visible.map(transcriptRow).join("") : empty);
   $("#transcriptMore").hidden = transcriptExhausted || !transcriptEntries.length;
 }
 
 function renderTranscriptLive() {
-  setHTML("#transcriptLive", [...livePartials.values()]
+  const partials = [...livePartials.values()]
     .sort((a, b) => b.localAt - a.localAt)
-    .slice(0, 6)
+    .slice(0, 6);
+  const latestPartial = partials[0];
+  const overviewLive = $("#overviewLiveText");
+  if (overviewLive) overviewLive.textContent = latestPartial?.text || "Waiting for speech…";
+  setHTML("#transcriptLive", partials
     .map((partial) => `<div class="transcript-partial"><span class="live-dot"></span><div><small>${escapeHtml(label(partial.source))} · hearing now</small><p>${escapeHtml(String(partial.text).slice(0, LIVE_PARTIAL_TEXT_CAP))}</p></div></div>`)
     .join(""));
 }
@@ -243,6 +270,9 @@ function setView(view) {
   $("#tabTranscript").setAttribute("aria-selected", String(transcript));
   $("#tabWorkspace").classList.toggle("active", workspace);
   $("#tabWorkspace").setAttribute("aria-selected", String(workspace));
+  $("#tabOverview").tabIndex = !transcript && !workspace ? 0 : -1;
+  $("#tabTranscript").tabIndex = transcript ? 0 : -1;
+  $("#tabWorkspace").tabIndex = workspace ? 0 : -1;
   if (transcript) transcriptLoaded ? refreshTranscriptHead() : loadTranscript(true);
   const hash = transcript ? "#transcript" : workspace ? "#workspace" : "";
   if (location.hash !== hash) history.replaceState(null, "", hash || location.pathname + location.search);
@@ -602,14 +632,15 @@ function renderJourney(journey) {
   $("#journeyPhone").textContent = journey.phone_returned
     ? "Discord delivered · collected by Samsung Flip"
     : journey.discord_delivered
-      ? "Discord delivered · awaiting phone poll"
+      ? "Discord delivered · phone reconnecting"
       : "Runs quietly in the background";
 }
 
 async function load() {
   try {
+    const failures = new Set();
     const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions, journey, workspaceItems] = await Promise.all([
-      safeJson("/api/metrics", {}), safeJson("/api/jobs", []), safeJson("/api/controls", {global:{mode:"unknown"}}), safeJson("/api/memory/operational", []), safeJson("/api/activity", []), safeJson("/api/desktop/doctor", {ready:false}), safeJson("/api/desktop/actions", []), safeJson("/api/computer-use", []), safeJson("/api/journey", {state:"idle",stages:[]}), safeJson("/api/workspace", [])
+      safeJson("/api/metrics", {}, failures), safeJson("/api/jobs", [], failures), safeJson("/api/controls", {global:{mode:"unknown"}}, failures), safeJson("/api/memory/operational", [], failures), safeJson("/api/activity", [], failures), safeJson("/api/desktop/doctor", {ready:false}, failures), safeJson("/api/desktop/actions", [], failures), safeJson("/api/computer-use", [], failures), safeJson("/api/journey", {state:"idle",stages:[]}, failures), safeJson("/api/workspace", [], failures)
     ]);
     renderAgent(agentSessions);
     renderJourney(journey);
@@ -621,14 +652,16 @@ async function load() {
       setHTML("#systemState", `<span class="pulse"></span> ${healthy ? "Online" : "Needs attention"}`);
       systemState.classList.toggle("healthy", healthy);
     }
-    $("#lastSync").textContent = `Updated ${new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
-    $("#modeLabel").textContent = mode.toUpperCase();
+    const connection = $("#connectionState");
+    connection.className = `connection-state ${failures.size ? "degraded" : "live"}`;
+    connection.innerHTML = `<i></i>${failures.size ? `${failures.size} panel${failures.size === 1 ? "" : "s"} reconnecting` : "Live"}`;
+    $("#lastSync").textContent = failures.size ? "Partial connection" : `Updated ${new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
     setHTML("#pause", `<span class="pause-icon"></span>${mode === "running" ? "Pause" : "Resume"}`);
     $("#pause").setAttribute("aria-pressed", String(mode !== "running"));
     document.body.dataset.mode = mode;
-    $("#mArchive").textContent = metrics.total ?? 0;
-    $("#mJobs").textContent = jobs.length;
-    $("#mDone").textContent = metrics.completed ?? 0;
+    $("#mArchive").textContent = failures.has("/api/metrics") ? "—" : metrics.total ?? 0;
+    $("#mJobs").textContent = failures.has("/api/jobs") ? "—" : jobs.length;
+    $("#mDone").textContent = failures.has("/api/metrics") ? "—" : metrics.completed ?? 0;
     setHTML("#jobs", jobs.length ? jobs.slice(0,12).map(jobRow).join("") : '<div class="empty-state compact"><strong>No delegated work yet</strong><small>Qualified signals will become traceable work here.</small></div>');
     $("#jobSummary").textContent = `Live · ${jobs.filter((job) => job.state === "completed").length} completed · ${jobs.filter((job) => !["completed","cancelled","dead_letter","failed","needs_attention"].includes(job.state)).length} active`;
     renderCurrentJob(jobs, activity);
@@ -650,6 +683,14 @@ $("#refreshDesktop").onclick = () => load();
 $("#tabOverview").onclick = () => setView("overview");
 $("#tabTranscript").onclick = () => setView("transcript");
 $("#tabWorkspace").onclick = () => setView("workspace");
+$("#transcriptSearch").addEventListener("input", (event) => {
+  transcriptQuery = event.target.value.trim().toLocaleLowerCase();
+  renderTranscript();
+});
+$("#transcriptFilter").addEventListener("change", (event) => {
+  transcriptFilter = event.target.value;
+  renderTranscript();
+});
 document.querySelector(".view-tabs").addEventListener("keydown", (event) => {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
   const tabs = [...document.querySelectorAll(".view-tab")];

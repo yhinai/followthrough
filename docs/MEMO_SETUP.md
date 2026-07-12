@@ -1,20 +1,20 @@
 # Memo Android sensor
 
-Memo is the primary phone sensor for Followthrough. Omi and the Termux uploader are not part of the active runtime path. Memo provides the complete two-way loop: audio upload, interim and finalized transcript delivery, durable job receipts, restart-safe status polling, Discord result delivery, and optional spoken results through the built-in phone speaker. The Samsung SM-F776U1 is the supported test phone; see [CURRENT_STATE.md](CURRENT_STATE.md).
+Memo is the primary phone sensor for Followthrough. Omi and the Termux uploader are not part of the active runtime path. Memo holds a consent-scoped LiveKit room connection and publishes only its microphone track. The Samsung SM-F776U1 is the supported test phone; see [CURRENT_STATE.md](CURRENT_STATE.md).
 
 ## Runtime path
 
 ```text
 Samsung Flip microphone
   -> Memo AmbientCaptureService
-  -> PCM16 chunks + interim/finalized Gemini input transcripts
-  -> https://followthrough.alhinai.dev
-  -> complete local archive
+  -> private LiveKit Cloud room
+  -> Followthrough LiveKit worker on Spark
+  -> Deepgram partial/final transcripts
   -> relevance gate
-  -> relevant-only Hermes job
+  -> every final stored in the transcript archive
+  -> relevant-only operational memory and Hermes job
   -> durable Discord DM result
-  -> tokenless status/result polling
-  -> optional phone loudspeaker response
+  -> optional LiveKit phone-loudspeaker response
 ```
 
 ## Source and build
@@ -24,7 +24,7 @@ Samsung Flip microphone
 - Android project: `/Users/alhinai/Projects/memo/android`
 - Package: `dev.alhinai.memo`
 
-The endpoint defaults to `https://followthrough.alhinai.dev`. The discreet Settings screen exposes only the endpoint, Gemini key, and `Discord only` / `Discord + voice` response choice. No Followthrough token is needed or stored.
+The endpoint defaults to `https://followthrough.alhinai.dev`. The discreet Settings screen exposes only the endpoint and `Discord only` / `Discord + voice` response choice. Memo sends explicit consent and its stable device ID to obtain a short-lived, room-scoped token; no LiveKit API secret is stored on the phone.
 
 ## Verified phone
 
@@ -38,12 +38,12 @@ The endpoint defaults to `https://followthrough.alhinai.dev`. The discreet Setti
 - Omi (`com.friend.ios`) process stopped and microphone permission revoked.
 - Termux audio uploader stopped.
 - Unused `followthrough-adb-bridge.service` disabled and stopped.
-- Memo foreground microphone service active.
-- Followthrough accepted real Memo PCM audio plus interim and finalized transcripts.
+- Memo foreground microphone service starts whenever the intentional Muted state is cleared.
+- Memo published a real microphone track to LiveKit Cloud and the Spark worker joined the same room.
 - Audio continued after the app left the foreground.
-- A real spoken gold-price request created an H Company session, completed a Hermes job, returned through restart-safe phone polling, and produced a verified Discord DM.
+- A real spoken gold-price request created an H Company session, completed a Hermes job, returned through LiveKit voice when enabled, and produced a verified Discord DM.
 - `Discord only` completed without phone playback; `Discord + voice` produced built-in-speaker playback.
-- Overlapping Gemini transcript windows are merged case-insensitively with whitespace normalization, so the live word stream updates in place instead of repeating prior phrases.
-- The 2026-07-12 device replay used the same completed Best Buy job for both response modes, then restored Memo to intentional `Muted` state with no injected test result left queued.
+- Adjacent STT finals are coalesced briefly on Spark so one spoken request creates one durable signal.
+- A generated spoken `Memo, research ...` request traversed LiveKit, Deepgram, the relevance gate, and Hermes as one event. Ordinary speech is preserved in the transcript archive but does not enter operational memory or trigger work.
 
 Omi may remain installed as an inactive rollback option, but Memo is the only active capture path.

@@ -118,6 +118,35 @@ def test_running_web_task_does_not_speak_a_stale_worker_summary(configured_setti
         assert body["computer_use"]["state"] == "running"
 
 
+def test_failed_web_task_returns_h_failure_not_worker_success(configured_settings) -> None:
+    settings, _, _ = configured_settings
+    settings.kanban_enabled = True
+    app = create_app(settings)
+    with TestClient(app) as client:
+        accepted = client.post(
+            "/api/v1/transcripts",
+            json={
+                "event_id": "web-failed-01",
+                "device_id": "memo-phone",
+                "source": "phone",
+                "consent": True,
+                "text": "Memo, check the price of gold today",
+            },
+        ).json()
+        app.state.store.update_run(accepted["run_id"], summary="Worker claimed success")
+        app.state.store.update_computer_session(
+            accepted["computer_use_id"],
+            state="failed",
+            error="Browser session failed",
+        )
+
+        body = client.get(f"/api/v1/jobs/{accepted['job_id']}").json()
+
+    assert body["state"] == "failed"
+    assert body["summary"] is None
+    assert body["error"] == "Browser session failed"
+
+
 def test_restart_resumes_an_orphaned_computer_use_session(configured_settings) -> None:
     settings, _, _ = configured_settings
     app = create_app(settings)

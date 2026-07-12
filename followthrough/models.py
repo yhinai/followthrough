@@ -104,6 +104,15 @@ class TranscriptPartialIn(BaseModel):
     consent: bool = True
 
 
+class LiveKitSessionIn(BaseModel):
+    device_id: str = Field(
+        min_length=3, pattern=r"^[a-z0-9-]{3,100}$", max_length=100
+    )
+    surface: Literal["memo-android", "dashboard"] = "memo-android"
+    consent: bool = False
+    response_mode: Literal["discord_and_voice", "discord_only"] = "discord_and_voice"
+
+
 class AudioChunkReceipt(BaseModel):
     event_id: str
     sequence: int

@@ -43,12 +43,36 @@ def test_actionable_replay_creates_one_run(configured_settings) -> None:
     assert first.status_code == 202
     assert second.status_code == 202
     assert first.json()["run_id"] == second.json()["run_id"]
+    assert first.json()["job_id"] == second.json()["job_id"]
     assert first.json()["status"] == "queued"
     assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
     # Replay short-circuits on the archived event: one run, one durable job.
     assert second.json()["created"] is False
     assert app.state.store.db.execute("SELECT COUNT(*) FROM hermes_jobs").fetchone()[0] == 1
     assert app.state.store.hermes_job_for_run(first.json()["run_id"])["id"]
+
+
+def test_actionable_web_replay_returns_existing_job_and_computer_receipts(
+    configured_settings,
+) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    payload = {
+        "event_id": "event-web-replay-0001",
+        "device_id": "memo-phone",
+        "text": "Memo, check the price of gold today",
+        "source": "phone",
+        "consent": True,
+    }
+
+    with TestClient(app) as client:
+        first = client.post("/api/v1/transcripts", headers=_auth(device_token), json=payload)
+        replay = client.post("/api/v1/transcripts", headers=_auth(device_token), json=payload)
+
+    assert replay.status_code == 202
+    assert replay.json()["created"] is False
+    assert replay.json()["job_id"] == first.json()["job_id"]
+    assert replay.json()["computer_use_id"] == first.json()["computer_use_id"]
 
 
 def test_phone_fragments_are_centrally_aggregated_before_dispatch(configured_settings) -> None:

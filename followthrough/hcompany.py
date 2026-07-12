@@ -13,7 +13,13 @@ from .config import Settings
 from .store import Store
 
 
-TERMINAL_STATES = {"completed", "failed", "timed_out", "interrupted"}
+TERMINAL_STATES = {
+    "completed",
+    "failed",
+    "timed_out",
+    "interrupted",
+    "configuration_required",
+}
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 

@@ -1,0 +1,15 @@
+.git
+.venv
+.pytest_cache
+.ruff_cache
+data
+docs
+scripts
+systemd
+deploy
+tests
+*.db
+*.log
+.env
+.env.*
+livekit.toml

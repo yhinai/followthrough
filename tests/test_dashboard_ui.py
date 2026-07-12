@@ -51,8 +51,8 @@ def test_transcript_streams_tokens_newest_first_in_pacific_time():
     assert "America/Los_Angeles" in js  # actual Pacific-time stamps per entry
     assert "transcript_partial" in js  # live token stream over SSE
     assert "transcript_archived" in js  # finalized entries arrive without polling
-    assert "recognition.interimResults = true" in js
-    assert "/api/v1/transcripts/partial" in js
+    assert "/api/v1/livekit/session" in js
+    assert "setMicrophoneEnabled(true)" in js
     assert "/api/transcript?" in js
     assert "insertTranscriptEntry" in js  # newest lands on top, order kept strict
     assert 'params.set("before", transcriptCursor.receivedAt)' in js
@@ -73,8 +73,8 @@ def test_transcript_stream_recovers_from_lossy_sse_delivery():
     # The live map is bounded and repaints are coalesced.
     assert "LIVE_PARTIAL_CAP" in js
     assert "scheduleLiveRender" in js
-    # Bundled final+interim recognition events are walked, not last-only.
-    assert "event.resultIndex" in js
+    # Browser capture uses the same LiveKit agent transport as Memo.
+    assert "RoomEvent.TrackSubscribed" in js
     # Brand link and hash edits keep the URL and visible view in sync.
     assert "hashchange" in js
 
@@ -111,3 +111,49 @@ def test_workspace_is_a_third_responsive_editable_view() -> None:
     assert 'method:"DELETE"' in js
     assert ".workspace-board" in css
     assert "@media(max-width:700px)" in css
+
+
+def test_premium_ui_exposes_phone_origin_truthful_health_and_transcript_filters() -> None:
+    html = HTML.read_text()
+    js = JS.read_text()
+    css = CSS.read_text()
+
+    assert 'class="listening-origin"' in html
+    assert 'id="overviewLiveText"' in html
+    assert "Memo · Samsung Flip" in html
+    assert 'id="connectionState"' in html
+    assert 'failures.size === 1 ? "" : "s"' in js
+    assert "reconnecting" in js
+    assert 'failures.has("/api/metrics") ? "—"' in js
+    assert 'id="transcriptSearch"' in html
+    assert 'id="transcriptFilter"' in html
+    assert "function transcriptClass" in js
+    assert "Memo command" in js
+    assert ".transcript-toolbar" in css
+    assert ".listening-origin" in css
+
+
+def test_tabs_use_roving_keyboard_focus() -> None:
+    html = HTML.read_text()
+    js = JS.read_text()
+
+    assert 'role="tablist"' in html
+    assert html.count('role="tab"') == 3
+    assert 'setAttribute("aria-selected"' in js
+    assert '.tabIndex = transcript ? 0 : -1' in js
+    assert 'event.key === "ArrowRight"' in js
+
+
+def test_browser_microphone_uses_vendored_livekit_with_remote_audio() -> None:
+    html = HTML.read_text()
+    js = JS.read_text()
+
+    assert '/static/vendor/livekit-client.umd.js' in html
+    assert 'id="micStatus"' in html
+    assert 'id="remoteAudio"' in html
+    assert 'device_id:"dashboard-web"' in js
+    assert 'surface:"dashboard"' in js
+    assert 'response_mode:"discord_and_voice"' in js
+    assert "track.attach()" in js
+    assert "setMicrophoneEnabled(false)" in js
+    assert "SpeechRecognition" not in js
