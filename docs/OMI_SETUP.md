@@ -12,13 +12,13 @@ In Omi → Settings → Developer Mode → Developer Settings, configure:
 
 ```text
 Real-Time Transcript:
-https://omi.alhinai.dev/api/webhooks/omi/transcript?token=<PER_DEVICE_SECRET>
+https://followthrough.alhinai.dev/api/webhooks/omi/transcript?token=<PER_DEVICE_SECRET>
 
 Conversation Events:
-https://omi.alhinai.dev/api/webhooks/omi/conversation?token=<PER_DEVICE_SECRET>
+https://followthrough.alhinai.dev/api/webhooks/omi/conversation?token=<PER_DEVICE_SECRET>
 
 Realtime Audio Bytes:
-https://omi.alhinai.dev/api/webhooks/omi/audio?token=<PER_DEVICE_SECRET>
+https://followthrough.alhinai.dev/api/webhooks/omi/audio?token=<PER_DEVICE_SECRET>
 Interval: 5 seconds
 ```
 

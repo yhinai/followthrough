@@ -16,3 +16,4 @@ data/effects/
 data/reports/*
 !data/reports/.gitkeep
 data/soak/
+data/phone-bridge/

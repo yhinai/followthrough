@@ -3,64 +3,92 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Followthrough · Ambient Operator</title>
-  <link rel="stylesheet" href="/static/styles.css">
-  <link rel="stylesheet" href="/static/dashboard.css">
+  <meta name="theme-color" content="#080b0d">
+  <title>Followthrough · Live Ambient Operator</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260711-2">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260711-2">
 </head>
 <body>
-<header>
-  <div class="brand"><span class="dot"></span><div><strong>Followthrough</strong><small>ambient operator on Spark</small></div></div>
-  <div id="systemState" class="pill"><span class="pulse"></span> checking stack</div>
-</header>
-<main>
-  <section class="hero">
-    <div>
-      <p class="eyebrow">Omi → encrypted Spark archive → Hermes</p>
-      <h1>Always listening.<br><em>Quietly acting.</em></h1>
-      <p class="lede">Your phone captures continuously. Spark preserves the complete private archive, promotes only relevant speech from your authenticated ambient device, and shows every research run, sandbox receipt, and typed action as it happens.</p>
-      <div class="controls">
-        <button id="pauseActions" class="secondary">Pause actions</button>
-        <button id="resumeActions" class="primary">Resume</button>
-        <button id="killAll" class="danger">Emergency stop</button>
-      </div>
-      <p class="privacy">Original audio and transcripts stay encrypted. Irrelevant life conversation never enters Hermes memory or an action queue.</p>
+  <div class="aurora a1"></div><div class="aurora a2"></div>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">F</span><div><strong>Followthrough</strong><small>Ambient intelligence on Spark</small></div></div>
+    <div class="header-status">
+      <span id="lastSync" class="sync">Connecting…</span>
+      <div id="systemState" class="pill"><span class="pulse"></span> checking stack</div>
     </div>
-    <div class="orb"><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><span>●</span><small id="modeLabel">LIVE</small></div>
-  </section>
+  </header>
 
-  <section class="flow panel-wide">
-    <div><b>1</b><span>Phone mic</span><small>Omi / device</small></div>
-    <i>→</i><div><b>2</b><span>Private archive</span><small>AES-256-GCM</small></div>
-    <i>→</i><div><b>3</b><span>Relevance gate</span><small>trusted device + intent</small></div>
-    <i>→</i><div><b>4</b><span>Hermes</span><small>least authority</small></div>
-    <i>→</i><div><b>5</b><span>Typed action</span><small>receipt + rollback</small></div>
-  </section>
+  <main>
+    <section class="hero-v2">
+      <div class="hero-copy">
+        <p class="eyebrow">Private ambient operator</p>
+        <h1>Your conversations.<br><em>Carried through.</em></h1>
+        <p class="lede">Followthrough listens for the moments that matter, turns intent into verified work, and makes every Hermes decision visible as it happens.</p>
+        <div class="hero-badges"><span>Omi live</span><span>Encrypted on Spark</span><span>Hermes managed</span></div>
+      </div>
+      <div class="listening-core">
+        <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <strong>Listening</strong><small id="modeLabel">RUNNING</small>
+        <div class="core-orbit"></div>
+      </div>
+    </section>
 
-  <section class="capture">
-    <div class="section-head"><div><p class="eyebrow">live demo input</p><h2>Inject a controlled signal.</h2></div><span>phone remains the primary sensor</span></div>
-    <textarea id="input" placeholder="Research and safely evaluate https://github.com/pypa/sampleproject"></textarea>
-    <div class="capture-actions"><button id="submit" class="primary">Send through the full pipeline →</button><button id="sample" class="secondary">Load repository example</button><button id="listen" class="secondary">Browser mic demo</button></div>
-  </section>
+    <section class="metric-strip panel-wide glass">
+      <div><small>Transcript events</small><b id="mArchive">0</b><span>encrypted</span></div>
+      <div><small>Audio chunks</small><b id="mAudio">0</b><span>preserved</span></div>
+      <div><small>Hermes jobs</small><b id="mJobs">0</b><span>total</span></div>
+      <div><small>Completed work</small><b id="mDone">0</b><span>verified</span></div>
+      <div><small>Average latency</small><b id="mLatency">—</b><span>end to end</span></div>
+    </section>
 
-  <section class="metric-strip panel-wide">
-    <div><b id="mArchive">0</b><span>encrypted transcript events</span></div>
-    <div><b id="mAudio">0</b><span>encrypted audio chunks</span></div>
-    <div><b id="mJobs">0</b><span>Hermes jobs</span></div>
-    <div><b id="mDone">0</b><span>completed runs</span></div>
-    <div><b id="mLatency">—</b><span>average latency</span></div>
-  </section>
+    <section class="command-grid">
+      <article class="glass transcript-panel">
+        <div class="section-head">
+          <div><p class="eyebrow">Live sensor feed</p><h2>Latest transcripts</h2></div>
+          <span class="live-chip"><i></i> Realtime</span>
+        </div>
+        <p class="panel-note">Owner-authenticated preview. Full records remain encrypted at rest.</p>
+        <div id="activity" class="activity-stream"><div class="empty-state"><span>◌</span>Waiting for the phone…</div></div>
+      </article>
 
-  <section class="grid dashboard-grid">
-    <div class="panel"><div class="section-head"><div><p class="eyebrow">real-time action trace</p><h2>Hermes jobs</h2></div><span class="live">● LIVE</span></div><div id="jobs" class="runs"><div class="empty">Waiting for a job…</div></div></div>
-    <div class="panel"><div class="section-head"><div><p class="eyebrow">promoted memory</p><h2>Relevant only</h2></div><span id="memoryCount">0 items</span></div><div id="memories" class="runs"><div class="empty">No promoted signals.</div></div></div>
-  </section>
+      <article class="glass focus-panel">
+        <div class="section-head"><div><p class="eyebrow">Now executing</p><h2>Hermes focus</h2></div><span id="activeCount" class="count-chip">0 active</span></div>
+        <div id="currentJob" class="current-job empty-focus">
+          <div class="focus-icon">H</div><strong>No task in progress</strong><p>Relevant speech will appear here the moment Hermes begins work.</p>
+        </div>
+        <div class="mini-flow"><span>Listen</span><i></i><span>Decide</span><i></i><span>Research</span><i></i><span>Act</span></div>
+      </article>
+    </section>
 
-  <section class="panel-wide control-proof">
-    <div><p class="eyebrow">autonomy supervisor</p><h2 id="controlTitle">Loading control plane…</h2><p id="controlDetail" class="lede"></p></div>
-    <div id="integrations" class="integrations"></div>
-  </section>
-</main>
-<footer><span>Followthrough · Hermes Buildathon SF</span><span>Cloudflare edge · Spark runtime · Discord receipts</span></footer>
-<script src="/static/app.js"></script>
+    <section class="glass workbench">
+      <div class="section-head">
+        <div><p class="eyebrow">Autonomous output</p><h2>Research &amp; task history</h2></div>
+        <span id="jobSummary">No work yet</span>
+      </div>
+      <div class="job-columns"><span>Work item</span><span>Status</span><span>Hermes receipt</span><span>Updated</span></div>
+      <div id="jobs" class="job-table"><div class="empty-state">Waiting for the first relevant signal…</div></div>
+    </section>
+
+    <section class="lower-grid">
+      <article class="glass memory-panel">
+        <div class="section-head"><div><p class="eyebrow">Curated context</p><h2>Operational memory</h2></div><span id="memoryCount">0 items</span></div>
+        <div id="memories" class="memory-list"><div class="empty-state">Nothing promoted yet.</div></div>
+      </article>
+      <article class="glass control-panel">
+        <div class="section-head"><div><p class="eyebrow">Autonomy supervisor</p><h2 id="controlTitle">Loading control plane…</h2></div></div>
+        <p id="controlDetail" class="panel-note"></p>
+        <div id="integrations" class="integrations"></div>
+        <div class="controls"><button id="pauseActions" class="secondary">Pause actions</button><button id="resumeActions" class="primary">Resume</button><button id="killAll" class="danger">Emergency stop</button></div>
+      </article>
+    </section>
+
+    <details class="glass demo-drawer">
+      <summary><span><b>Demo control</b><small>Inject a controlled signal without the phone</small></span><span>Open console ↗</span></summary>
+      <div class="demo-body"><textarea id="input" placeholder="Research and safely evaluate https://github.com/pypa/sampleproject"></textarea><div class="capture-actions"><button id="submit" class="primary">Run through Hermes →</button><button id="sample" class="secondary">Load example</button><button id="listen" class="secondary">Browser mic</button></div></div>
+    </details>
+  </main>
+
+  <footer><span>Followthrough · Hermes Buildathon SF</span><span>Cloudflare edge · NVIDIA Spark · Discord receipts</span></footer>
+  <script src="/static/app.js?v=20260711-2"></script>
 </body>
 </html>

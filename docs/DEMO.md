@@ -6,7 +6,7 @@
 
 ## Live demo — remaining 1 minute 40 seconds
 
-1. Open https://omi.alhinai.dev on the judge's phone.
+1. Open https://followthrough.alhinai.dev on the judge's phone.
 2. Turn on the visible consented session.
 3. Say: “I met Maya from Acme. She wants Hermes for support automation. Research Acme and prepare a Tuesday follow-up.”
 4. Show the Hermes manager creating a request-specific plan and delegating to entity resolution, research, opportunity, relationship, CRM, and QA roles.

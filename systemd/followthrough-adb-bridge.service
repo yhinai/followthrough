@@ -1,0 +1,24 @@
+[Unit]
+Description=Followthrough Omi realtime transcript bridge over wireless ADB
+After=network-online.target followthrough.service
+Wants=network-online.target
+Requires=followthrough.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alhinai/Projects/followthrough
+Environment=PATH=/home/alhinai/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/alhinai/Projects/followthrough/.venv/bin/python /home/alhinai/Projects/followthrough/scripts/followthrough-adb-bridge.py --serial 100.96.0.1:40785
+Restart=always
+RestartSec=2
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/alhinai/Projects/followthrough/data/phone-bridge /home/alhinai/.android
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target

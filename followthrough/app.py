@@ -912,6 +912,36 @@ def create_app(config: Settings = settings) -> FastAPI:
         require_dashboard(authorization, x_followthrough_token)
         return {**store.metrics(), **archive_store.metrics(), "job_counts": store.hermes_job_counts(), "orchestrator": store.heartbeat_status("orchestrator"), "integrations": {"hermes": shutil.which(config.hermes_bin) is not None, "convex": bool(config.convex_url), "linkup": bool(config.linkup_api_key), "elevenlabs": bool(config.elevenlabs_api_key), "dodo": bool(config.dodo_payments_api_key)}}
 
+    @application.get("/api/activity")
+    async def activity(
+        authorization: str | None = Header(default=None),
+        x_followthrough_token: str | None = Header(default=None),
+    ) -> list[dict[str, object]]:
+        require_dashboard(authorization, x_followthrough_token)
+        result: list[dict[str, object]] = []
+        for event in archive_store.recent_events(24):
+            try:
+                plaintext = vault.decrypt(
+                    event["transcript_cipher"],
+                    f"transcript:{event['event_id']}".encode(),
+                ).decode("utf-8", errors="replace")
+            except ArchiveIntegrityError:
+                plaintext = "[encrypted transcript unavailable]"
+            result.append(
+                {
+                    "event_id": event["event_id"],
+                    "source": event["source"],
+                    "device_id": event["device_id"],
+                    "occurred_at": event["occurred_at"],
+                    "received_at": event["received_at"],
+                    "text": plaintext[:320],
+                    "relevant": bool(event["relevant"]),
+                    "classification": event["classification"],
+                    "run_id": event["run_id"],
+                }
+            )
+        return result
+
     @application.get("/api/audio/{filename}")
     async def audio(filename: str, authorization: str | None = Header(default=None), x_followthrough_token: str | None = Header(default=None)) -> FileResponse:
         require_dashboard(authorization, x_followthrough_token)

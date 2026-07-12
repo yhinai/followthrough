@@ -88,6 +88,14 @@ class ArchiveStore:
         row = self.db.execute("SELECT * FROM archive_events WHERE id=?", (archive_id,)).fetchone()
         return dict(row) if row else None
 
+    def recent_events(self, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            "SELECT * FROM archive_events WHERE classification != 'audio_only' "
+            "ORDER BY received_at DESC LIMIT ?",
+            (max(1, min(limit, 100)),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def link_run(self, archive_id: str, run_id: str) -> None:
         with self.lock:
             self.db.execute("UPDATE archive_events SET run_id=? WHERE id=?", (run_id, archive_id))

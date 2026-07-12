@@ -6,7 +6,7 @@ AI as Agency. Confirm this matches the organizer's locked registration record be
 
 ## Live product
 
-https://omi.alhinai.dev
+https://followthrough.alhinai.dev
 
 ## One sentence
 
