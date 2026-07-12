@@ -275,7 +275,6 @@ async function load() {
       jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions"), jsonApi("/api/computer-use"), jsonApi("/api/journey")
     ]);
     renderAgent(agentSessions);
-    renderJourney(journey);
     renderJourney(activity, agentSessions, jobs);
     const mode = controls.global.mode;
     const healthy = metrics.orchestrator?.status === "ok";
