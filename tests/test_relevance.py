@@ -11,11 +11,13 @@ from followthrough.relevance import (
     Disposition,
     InterestModel,
     InterestWeight,
+    InformationRoute,
     OwnerStatus,
     Provenance,
     SpeakerContext,
     content_fingerprint,
     evaluate_relevance,
+    information_route,
 )
 
 
@@ -281,6 +283,7 @@ def test_spoken_web_command_is_classified_as_web_task():
     )
     assert result.primary_category == Category.WEB_TASK
     assert result.dispatch_allowed is True
+    assert result.to_dict()["information_route"] == "live_research"
 
     price = evaluate_relevance(
         "Followthrough, check the current RTX 5080 price on Best Buy and tell me when you're done.",
@@ -332,3 +335,66 @@ def test_book_and_research_noun_contexts_are_not_web_tasks(spoken: str) -> None:
 def test_incomplete_research_fragment_waits_for_its_object(fragment: str) -> None:
     result = evaluate_relevance(fragment, NATIVE_OWNER)
     assert result.dispatch_allowed is False
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "What is the latest news about the World Cup?",
+        "What's the current World Cup score?",
+        "What's the cost of gold today?",
+        "Is the RTX 5090 available right now?",
+        "What is tomorrow's weather forecast?",
+    ],
+)
+def test_time_sensitive_information_questions_require_live_research(spoken: str) -> None:
+    result = evaluate_relevance(spoken, NATIVE_OWNER)
+    assert information_route(spoken) == InformationRoute.LIVE_RESEARCH
+    assert result.primary_category == Category.WEB_TASK
+    assert result.dispatch_allowed is True
+    assert result.to_dict()["information_route"] == "live_research"
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "How much caffeine is in a Red Bull?",
+        "What is photosynthesis?",
+        "Who invented the transistor?",
+    ],
+)
+def test_stable_information_questions_do_not_browse(spoken: str) -> None:
+    result = evaluate_relevance(spoken, NATIVE_OWNER)
+    assert information_route(spoken) == InformationRoute.STABLE_ANSWER
+    assert result.dispatch_allowed is False
+    assert result.reason_code == "stable_answer"
+    assert result.to_dict()["information_route"] == "stable_answer"
+
+
+def test_explicit_web_search_overrides_stable_information_route() -> None:
+    spoken = "Search the web and tell me how much caffeine is in a Red Bull."
+    result = evaluate_relevance(spoken, NATIVE_OWNER)
+    assert information_route(spoken) == InformationRoute.NOT_INFORMATION_QUERY
+    assert result.primary_category == Category.WEB_TASK
+    assert result.dispatch_allowed is True
+    assert result.to_dict()["information_route"] == "live_research"
+
+
+def test_email_request_requires_sender_setup_when_email_is_unavailable() -> None:
+    result = evaluate_relevance(
+        "Can you send me email?", NATIVE_OWNER, available_capabilities=frozenset()
+    )
+    assert result.dispatch_allowed is False
+    assert result.primary_category == Category.CONTACT
+    assert result.reason_code == "clarification_setup_needed"
+    assert result.evidence[-1].rule_id == "setup.email_sender_not_configured"
+
+
+def test_email_request_can_route_when_sender_is_configured() -> None:
+    result = evaluate_relevance(
+        "Send an email to Maya about the launch.",
+        NATIVE_OWNER,
+        available_capabilities=frozenset({"email"}),
+    )
+    assert result.dispatch_allowed is True
+    assert result.primary_category == Category.CONTACT

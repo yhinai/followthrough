@@ -45,6 +45,28 @@ def test_aggregates_search_the_web_with_natural_connector_words() -> None:
     assert result.text == "Oh, search the web and figure out how much caffeine is in a Red Bull."
 
 
+def test_incomplete_commands_wait_for_the_next_segment() -> None:
+    cases = [
+        ("perform a web search", "for the latest World Cup news"),
+        ("Followthrough, research the", "latest World Cup schedule"),
+        ("check it out", "for current RTX 5090 prices"),
+    ]
+    for first_text, second_text in cases:
+        aggregator = TranscriptAggregator(window_seconds=45)
+        assert aggregator.add(segment(1, first_text), monotonic_at=1) is None
+        assert aggregator.waiting_for_context is True
+        result = aggregator.add(segment(2, second_text), monotonic_at=2)
+        assert result is not None
+        assert result.text == f"{first_text} {second_text}"
+        assert aggregator.waiting_for_context is False
+
+
+def test_bare_search_the_web_waits_instead_of_launching_without_a_query() -> None:
+    aggregator = TranscriptAggregator(window_seconds=45)
+    assert aggregator.add(segment(1, "search the web."), monotonic_at=1) is None
+    assert aggregator.waiting_for_context is True
+
+
 def test_does_not_aggregate_ordinary_or_passive_tool_conversation() -> None:
     aggregator = TranscriptAggregator(window_seconds=45)
     assert aggregator.add(segment(1, "The pizza was good"), monotonic_at=1) is None

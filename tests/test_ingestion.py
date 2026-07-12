@@ -102,7 +102,7 @@ def test_phone_fragments_are_centrally_aggregated_before_dispatch(configured_set
             },
         )
     assert first.status_code == 202
-    assert first.json()["status"] == "archived"
+    assert first.json()["status"] == "waiting_for_context"
     assert second.status_code == 202
     assert second.json()["status"] == "queued"
     assert second.json()["aggregate_event_id"].startswith("adb-omi:aggregate:")
@@ -157,6 +157,115 @@ def test_book_noun_context_does_not_create_an_action(configured_settings) -> Non
 
     assert response.status_code == 202
     assert response.json()["status"] == "archived"
+    assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+
+
+def test_time_sensitive_question_creates_live_web_work(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-world-cup-news-0001",
+                "device_id": "memo-phone",
+                "text": "What is the latest news about the World Cup?",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["classification"]["kind"] == "web_task"
+    assert response.json()["relevance"]["information_route"] == "live_research"
+    assert response.json()["computer_use_id"]
+    assert app.state.store.hermes_job_for_run(response.json()["run_id"])["category"] == "web_task"
+
+
+def test_stable_question_is_traced_without_web_work(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-stable-caffeine-0001",
+                "device_id": "memo-phone",
+                "text": "How much caffeine is in a Red Bull?",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "archived"
+    assert response.json()["classification"]["kind"] == "stable_answer"
+    assert response.json()["relevance"]["information_route"] == "stable_answer"
+    assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+    assert app.state.store.db.execute("SELECT COUNT(*) FROM computer_use_sessions").fetchone()[0] == 0
+
+
+def test_incomplete_command_waits_then_combines_with_next_segment(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-wait-search-0001",
+                "device_id": "memo-phone",
+                "text": "perform a web search",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+        second = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-wait-search-0002",
+                "device_id": "memo-phone",
+                "text": "for the latest World Cup news",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+
+    assert first.status_code == 202
+    assert first.json()["status"] == "waiting_for_context"
+    assert first.json()["classification"]["kind"] == "waiting_for_context"
+    assert second.status_code == 202
+    assert second.json()["status"] == "queued"
+    assert second.json()["aggregate_event_id"].startswith("adb-omi:aggregate:")
+    assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+
+
+def test_email_request_reports_setup_needed_without_creating_work(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-email-setup-0001",
+                "device_id": "memo-phone",
+                "text": "Can you send me email?",
+                "source": "phone",
+                "consent": True,
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "clarification_setup_needed"
+    assert response.json()["classification"]["kind"] == "clarification_setup_needed"
+    assert response.json()["relevance"]["evidence"][-1]["rule_id"] == (
+        "setup.email_sender_not_configured"
+    )
     assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
 
 

@@ -27,8 +27,34 @@ ACTION = re.compile(
 )
 SUBJECT = re.compile(
     r"\b(github|repo(?:sitory)?|tool|framework|library|sdk|api|startup|company|"
-    r"event|calendar|meeting|task|todo|to-do|hermes|agent|automation|web|internet|online)\b|"
+    r"event|calendar|meeting|task|todo|to-do|hermes|agent|automation)\b|"
     r"(?:https?://)?github\.com/[\w.-]+/[\w.-]+",
+    re.I,
+)
+SEARCH_QUERY = re.compile(
+    r"(?:^(?:oh[,\s]+)?|\b(?:please|can\s+you|could\s+you|would\s+you)\s+)"
+    r"(?:perform\s+(?:a\s+)?web\s+search|search\s+(?:the\s+)?(?:web|internet)|"
+    r"search\s+online)\s+"
+    r"(?:(?:for|about)\s+|and\s+(?:find|figure\s+out|tell\s+me|check)\s+)?\S+|"
+    r"(?:^(?:oh[,\s]+)?|\b(?:please|can\s+you|could\s+you|would\s+you)\s+)search\s+(?:"
+    r"(?:(?:the\s+)?(?:web|internet)|online)\s+"
+    r"(?:(?:for|about)\s+|and\s+(?:find|figure\s+out|tell\s+me|check)\s+)?\S+|"
+    r"(?!the\s+(?:web|internet)[.!?]*$|online[.!?]*$)\S+(?:\s+\S+)*"
+    r")",
+    re.I,
+)
+RESEARCH_QUERY = re.compile(
+    r"(?:^|[.!?]\s*|\b(?:follow\s*through|memo)\s*[,;:\-]?\s*)"
+    r"(?:please\s+)?research\s+(?:(?:this|that|the|a|an|my|our)\s+)?"
+    r"(?!(?:this|that|the|a|an|my|our)[.!?]*$)\S+",
+    re.I,
+)
+CHECK_QUERY = re.compile(r"\bcheck\s+it\s+out\s+(?:for\s+|and\s+)?\S+", re.I)
+INCOMPLETE_COMMAND = re.compile(
+    r"(?:^|[.!?]\s*|\b(?:follow\s*through|memo)\s*[,;:\-]?\s*)"
+    r"(?:please\s+)?(?:research(?:\s+(?:the|a|an|this|that|my|our))?|"
+    r"perform\s+(?:a\s+)?web\s+search|search\s+(?:(?:the\s+)?(?:web|internet)|online)|"
+    r"check\s+it\s+out)\s*[.!?]*$",
     re.I,
 )
 
@@ -53,6 +79,7 @@ class TranscriptAggregator:
         self.window_seconds = window_seconds
         self.max_segments = max_segments
         self._segments: deque[tuple[float, Transcript]] = deque()
+        self.waiting_for_context = False
 
     def add(self, transcript: Transcript, *, monotonic_at: float | None = None) -> Transcript | None:
         observed = time.monotonic() if monotonic_at is None else monotonic_at
@@ -65,7 +92,11 @@ class TranscriptAggregator:
 
         candidates = [item for _, item in self._segments if item.text.strip()]
         text = " ".join(item.text.strip() for item in candidates)
-        if not (ACTION.search(text) and SUBJECT.search(text)):
+        self.waiting_for_context = bool(INCOMPLETE_COMMAND.search(text))
+        query_complete = SEARCH_QUERY.search(text) or RESEARCH_QUERY.search(text) or CHECK_QUERY.search(
+            text
+        )
+        if not ((ACTION.search(text) and SUBJECT.search(text)) or query_complete):
             return None
 
         # Dispatch the shortest contiguous suffix that contains both an action
@@ -76,7 +107,12 @@ class TranscriptAggregator:
         for index in range(len(candidates) - 1, -1, -1):
             suffix = candidates[index:]
             suffix_text = " ".join(item.text.strip() for item in suffix)
-            if ACTION.search(suffix_text) and SUBJECT.search(suffix_text):
+            suffix_query = (
+                SEARCH_QUERY.search(suffix_text)
+                or RESEARCH_QUERY.search(suffix_text)
+                or CHECK_QUERY.search(suffix_text)
+            )
+            if (ACTION.search(suffix_text) and SUBJECT.search(suffix_text)) or suffix_query:
                 selected = suffix
                 text = suffix_text
                 break
@@ -85,6 +121,7 @@ class TranscriptAggregator:
         component_ids = "\0".join(item.event_id for item in selected)
         digest = hashlib.sha256(f"{component_ids}\0{text}".encode()).hexdigest()
         self._segments.clear()
+        self.waiting_for_context = False
         return Transcript(
             event_id=f"adb-omi:aggregate:{digest}",
             occurred_at=occurred_at,

@@ -438,12 +438,21 @@ def create_app(config: Settings = settings) -> FastAPI:
         *,
         speaker: SpeakerContext,
         suppress_dispatch: bool = False,
+        waiting_for_context: bool = False,
     ) -> dict[str, object]:
         transcript = payload.text.strip()
         if len(transcript.encode()) > config.max_transcript_bytes:
             raise HTTPException(status_code=413, detail="transcript exceeds configured limit")
         authorize_capture(f"transcript:{payload.event_id}", f"capture:{payload.source}")
-        relevance = evaluate_relevance(transcript, speaker, store.interest_model())
+        relevance = evaluate_relevance(
+            transcript,
+            speaker,
+            store.interest_model(),
+            # Followthrough currently has no outbound email driver. A sender
+            # address alone would not make delivery real, so fail closed until
+            # an actual email capability is connected.
+            available_capabilities=frozenset(),
+        )
         category = (
             relevance.primary_category.value
             if relevance.primary_category
@@ -457,8 +466,13 @@ def create_app(config: Settings = settings) -> FastAPI:
             kind = "owner_unverified"
         else:
             kind = relevance.reason_code
+        if waiting_for_context and not relevance.dispatch_allowed:
+            kind = "waiting_for_context"
         classification = Classification(
-            relevance.dispatch_allowed, kind, relevance.confidence, relevance.reason_code
+            relevance.dispatch_allowed,
+            kind,
+            relevance.confidence,
+            "waiting_for_context" if kind == "waiting_for_context" else relevance.reason_code,
         )
         transcript_bytes = transcript.encode()
         archived, created = archive_store.archive_event(
@@ -470,7 +484,11 @@ def create_app(config: Settings = settings) -> FastAPI:
             transcript_sha256=archive.digest(transcript.encode()),
             relevant=relevance.dispatch_allowed,
             classification=classification.kind,
-            metadata={**payload.metadata, "relevance": relevance.to_dict()},
+            metadata={
+                **payload.metadata,
+                "relevance": relevance.to_dict(),
+                **({"context_state": "waiting_for_context"} if waiting_for_context else {}),
+            },
         )
         if not created:
             if archived["transcript_sha256"] != archive.digest(transcript.encode()):
@@ -498,7 +516,13 @@ def create_app(config: Settings = settings) -> FastAPI:
                 "event_id": payload.event_id,
                 "archive_id": archived["id"],
                 "created": False,
-                "status": "archived",
+                "status": (
+                    "waiting_for_context"
+                    if classification.kind == "waiting_for_context"
+                    else "clarification_setup_needed"
+                    if relevance.reason_code == "clarification_setup_needed"
+                    else "archived"
+                ),
                 "classification": archived["classification"],
             }
         # Announce before the operations-DB write: if record_relevance fails,
@@ -554,7 +578,13 @@ def create_app(config: Settings = settings) -> FastAPI:
                 "event_id": payload.event_id,
                 "archive_id": archived["id"],
                 "created": True,
-                "status": "archived",
+                "status": (
+                    "waiting_for_context"
+                    if classification.kind == "waiting_for_context"
+                    else "clarification_setup_needed"
+                    if relevance.reason_code == "clarification_setup_needed"
+                    else "archived"
+                ),
                 "classification": classification.__dict__,
                 "relevance": relevance.to_dict(),
                 "operational_memory": False,
@@ -595,6 +625,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             "archive_id": archived["id"],
             "created": True,
             "classification": classification.__dict__,
+            "relevance": relevance.to_dict(),
             **queued,
             **({"computer_use_id": computer_use["id"]} if computer_use else {}),
         }
@@ -672,7 +703,7 @@ def create_app(config: Settings = settings) -> FastAPI:
             aggregate = replay_aggregator.add(
                 Transcript(payload.event_id, _utc(payload.occurred_at), payload.text)
             )
-            aggregator = replay_aggregator if aggregate else None
+            aggregator = replay_aggregator
         elif payload.source in {"phone", "wearable"} and not payload.metadata.get("aggregated"):
             aggregator = application.state.transcript_aggregators.setdefault(
                 payload.device_id, TranscriptAggregator()
@@ -684,6 +715,9 @@ def create_app(config: Settings = settings) -> FastAPI:
             payload,
             speaker=speaker,
             suppress_dispatch=aggregate is not None,
+            waiting_for_context=(
+                bool(aggregator and aggregator.waiting_for_context) and aggregate is None
+            ),
         )
         if aggregate and aggregator:
             aggregate_payload = TranscriptEventIn(

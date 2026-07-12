@@ -33,6 +33,12 @@ class Disposition(str, Enum):
     HOLD = "hold"
 
 
+class InformationRoute(str, Enum):
+    LIVE_RESEARCH = "live_research"
+    STABLE_ANSWER = "stable_answer"
+    NOT_INFORMATION_QUERY = "not_information_query"
+
+
 class Category(str, Enum):
     REPOSITORY = "repository"
     WEB_TASK = "web_task"
@@ -261,6 +267,7 @@ class RelevanceResult:
     reason_code: str
     evidence: tuple[Evidence, ...]
     ambient_authorized: bool = False
+    information_route: InformationRoute = InformationRoute.NOT_INFORMATION_QUERY
 
     @property
     def dispatch_allowed(self) -> bool:
@@ -292,6 +299,7 @@ class RelevanceResult:
             "dispatch_allowed": self.dispatch_allowed,
             "owner_status": self.owner_status.value,
             "ambient_authorized": self.ambient_authorized,
+            "information_route": self.information_route.value,
             "categories": [category.value for category in self.categories],
             "primary_category": self.primary_category.value if self.primary_category else None,
             "confidence": self.confidence,
@@ -343,11 +351,25 @@ _RULES: tuple[_Rule, ...] = (
             r"how\s+much\s+is\s+(?:gold|silver|bitcoin|ethereum)\b|"
             r"fill\s+(?:out|in)|sign\s+(?:me\s+)?up\s+for|apply\s+(?:to|for)|"
             r"find\s+(?:me\s+)?(?:a|an|the|the\s+cheapest|cheap)\b|"
-            r"search\s+(?:(?:the\s+)?(?:web|internet)\b|online\b|(?:for|about)\b)|"
+            r"search\s+(?:(?:(?:the\s+)?(?:web|internet)|online)\s+\S+|(?:for|about)\s+\S+)|"
+            r"(?:^|\b(?:please|can\s+you|could\s+you|would\s+you)\s+)"
+            r"search\s+(?!is\b|was\b|the\s+(?:web|internet)\s*$|online\s*$)\S+|"
             r"look[ -]?up\b)"
         ),
         0.94,
         "Recognized a web task the computer-use agent can run",
+    ),
+    _Rule(
+        "web_task.fresh_information",
+        Category.WEB_TASK,
+        _rx(
+            r"^(?:(?:um+|uh+|so)[,\s]+)?(?:ask\s+)?"
+            r"(?:what(?:'s|\s+is|\s+are)|who(?:'s|\s+is)|where|when|how|which|is|are)\b"
+            r".{0,140}\b(?:latest|current|today|tonight|now|recent|news|price|cost|"
+            r"availability|available|stock|score|schedule|weather|forecast|release|version)\b"
+        ),
+        0.94,
+        "Recognized a time-sensitive information request",
     ),
     _Rule(
         "web_task.research",
@@ -560,6 +582,29 @@ def _category_evidence(clean: str) -> tuple[tuple[Category, ...], tuple[Evidence
     return categories, evidence
 
 
+_INFORMATION_QUESTION = _rx(
+    r"^(?:please\s+)?(?:what(?:'s|\s+is|\s+are)?|who(?:'s|\s+is)?|where|when|why|"
+    r"how(?:\s+much|\s+many)?|which|is|are|does|do|can)\b"
+)
+_FRESHNESS_SIGNAL = _rx(
+    r"\b(?:latest|current|today(?:'s)?|tonight|right\s+now|now|recent|news|price|cost|"
+    r"availability|available|stock|score|schedule|weather|forecast|release|version)\b"
+)
+_EMAIL_ACTION = _rx(
+    r"\b(?:can\s+you\s+|could\s+you\s+|please\s+)?send\s+(?:me\s+|an?\s+)?email\b|"
+    r"\bemail\s+(?:me|[A-Za-z][\w.-]*)\b"
+)
+
+
+def information_route(text: str) -> InformationRoute:
+    clean = " ".join(text.split())
+    if not _INFORMATION_QUESTION.search(clean):
+        return InformationRoute.NOT_INFORMATION_QUERY
+    if _FRESHNESS_SIGNAL.search(clean):
+        return InformationRoute.LIVE_RESEARCH
+    return InformationRoute.STABLE_ANSWER
+
+
 def _ordinary_evidence(clean: str) -> Evidence | None:
     for rule_id, pattern, explanation in _ORDINARY_RULES:
         if pattern.search(clean):
@@ -576,6 +621,7 @@ def evaluate_relevance(
     text: str,
     speaker: SpeakerContext | None = None,
     interests: InterestModel | None = None,
+    available_capabilities: frozenset[str] = frozenset({"email"}),
 ) -> RelevanceResult:
     """Classify one transcript unit with an owner gate and deterministic rules."""
 
@@ -599,6 +645,31 @@ def evaluate_relevance(
             ),
         )
     categories, evidence = _category_evidence(clean)
+    if (
+        _EMAIL_ACTION.search(clean)
+        and "email" not in available_capabilities
+        and (owner_status == OwnerStatus.OWNER or ambient_authorized)
+    ):
+        return RelevanceResult(
+            fingerprint,
+            Disposition.IGNORE,
+            False,
+            owner_status,
+            (Category.CONTACT,),
+            Category.CONTACT,
+            0.99,
+            "clarification_setup_needed",
+            speaker_evidence
+            + (
+                Evidence(
+                    "setup.email_sender_not_configured",
+                    Category.CONTACT,
+                    0.99,
+                    "Email delivery requires a configured sender account",
+                ),
+            ),
+            ambient_authorized=ambient_authorized,
+        )
     if memo_activated:
         if not categories:
             categories = (Category.WEB_TASK,)
@@ -682,6 +753,29 @@ def evaluate_relevance(
         )
 
     if not categories:
+        route = information_route(clean)
+        if route == InformationRoute.STABLE_ANSWER:
+            return RelevanceResult(
+                fingerprint,
+                Disposition.IGNORE,
+                False,
+                owner_status,
+                (),
+                None,
+                0.9,
+                route.value,
+                speaker_evidence
+                + (
+                    Evidence(
+                        "information.stable_answer",
+                        None,
+                        0.9,
+                        "The information request does not require live web research",
+                    ),
+                ),
+                ambient_authorized=ambient_authorized,
+                information_route=route,
+            )
         return RelevanceResult(
             fingerprint,
             Disposition.IGNORE,
@@ -751,6 +845,11 @@ def evaluate_relevance(
         ),
         speaker_evidence + evidence,
         ambient_authorized=ambient_authorized,
+        information_route=(
+            InformationRoute.LIVE_RESEARCH
+            if primary == Category.WEB_TASK
+            else InformationRoute.NOT_INFORMATION_QUERY
+        ),
     )
 
 
@@ -762,10 +861,12 @@ __all__ = [
     "Evidence",
     "InterestModel",
     "InterestWeight",
+    "InformationRoute",
     "OwnerStatus",
     "Provenance",
     "RelevanceResult",
     "SpeakerContext",
     "content_fingerprint",
     "evaluate_relevance",
+    "information_route",
 ]
