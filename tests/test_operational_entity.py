@@ -69,9 +69,32 @@ def test_start_url_lands_the_agent_on_the_named_site() -> None:
 
 
 def test_web_task_keeps_the_full_price_command_not_best_buy_verb_collision() -> None:
-    from followthrough.integrations import operational_entity
+    # "Buy" inside "Best Buy" once read as the command verb. The command must
+    # survive intact, minus the part addressed to Followthrough rather than to
+    # the browser: the agent has no way to "tell me when you're done".
+    spoken = "Followthrough, check the current RTX 5080 price on Best Buy and tell me when you're done"
+    assert operational_entity(spoken, "web_task") == "check the current RTX 5080 price on Best Buy"
 
+
+
+def test_web_command_survives_the_wake_word_and_the_best_buy_trap() -> None:
+    # "Buy" inside "Best Buy" used to be read as the command verb, which sent
+    # the agent off to "Buy and tell me when you are done".
+    spoken = "Followthrough, check the current RTX 5080 price on Best Buy and tell me when you are done."
+    assert operational_entity(spoken, "web_task") == "check the current RTX 5080 price on Best Buy"
+
+
+def test_web_command_drops_trailing_instructions_to_the_assistant() -> None:
     assert operational_entity(
-        "Followthrough, check the current RTX 5080 price on Best Buy and tell me when you're done.",
-        "web_task",
-    ) == "check the current RTX 5080 price on Best Buy and tell me when you're done"
+        "Hey Followthrough, check the price of the RTX 5080 on Best Buy, thanks", "web_task"
+    ) == "check the price of the RTX 5080 on Best Buy"
+
+
+def test_start_url_query_excludes_the_wake_word_and_assistant_tail() -> None:
+    from followthrough.integrations import start_url
+
+    spoken = "Followthrough, check the current RTX 5080 price on Best Buy and tell me when you're done."
+    command = operational_entity(spoken, "web_task")
+    # Searching Best Buy for "followthrough ... tell me when you're done" sent
+    # the agent wandering for 46 steps.
+    assert start_url(command) == "https://www.bestbuy.com/site/searchpage.jsp?st=rtx+5080"

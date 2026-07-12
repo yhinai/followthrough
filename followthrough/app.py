@@ -523,8 +523,10 @@ def create_app(config: Settings = settings) -> FastAPI:
                 subject,
                 source_event_id=payload.event_id,
                 # Land the agent on the named site directly; the search-engine
-                # hop is where most steps and bot-checks were spent.
-                start_url=payload.metadata.get("start_url") or start_url(transcript),
+                # hop is where most steps and bot-checks were spent. Derive it
+                # from the cleaned command, or the wake word and the words meant
+                # for Followthrough end up inside the site's search box.
+                start_url=payload.metadata.get("start_url") or start_url(subject),
             )
         return {
             "event_id": payload.event_id,

@@ -78,9 +78,10 @@ def operational_entity(text: str, category: str) -> str:
     transcript remains in the complete archive.
     """
 
+    if category == "web_task":
+        return web_task_command(text)
     named = entity(text)
-    # A web task is the whole bounded command, not a single extracted name.
-    if named != "the identified opportunity" and category != "web_task":
+    if named != "the identified opportunity":
         return named
     if category not in _ACTION_MARKERS:
         return named
@@ -144,3 +145,33 @@ def start_url(text: str) -> str | None:
             return template.split("?")[0]
         return template.format(q=quote_plus(query))
     return None
+
+
+# A spoken web command is the whole sentence, not a clause starting at a verb:
+# hunting for a verb matched "Buy" inside "Best Buy" and sent the agent off to
+# buy something. Strip the wake word and the meta-instructions aimed at
+# Followthrough itself, and hand the agent the rest verbatim.
+_WAKE_WORD = re.compile(r"^\s*(?:hey\s+|ok\s+)?followthrough[\s,:-]+", re.I)
+_ASSISTANT_TAIL = re.compile(
+    r"[,\s]*(?:and\s+)?(?:then\s+)?(?:please\s+)?"
+    r"(?:tell\s+me(?:\s+when\s+you(?:'re| are)?\s+done)?|let\s+me\s+know(?:\s+when.*)?|"
+    r"report\s+back|and\s+get\s+back\s+to\s+me|ok(?:ay)?|thanks?(?:\s+you)?)\s*[.!?]*\s*$",
+    re.I,
+)
+
+
+def web_task_command(text: str) -> str:
+    clean = " ".join(text.split())
+    clean = _FILLER.sub("", clean)
+    clean = _WAKE_WORD.sub("", clean)
+    for pattern in _CREDENTIAL_PATTERNS:
+        clean = pattern.sub("[redacted credential]", clean)
+    # The command is the first sentence; whatever was said afterwards is
+    # surrounding conversation and must not reach the agent.
+    clean = re.split(r"(?<=[.!?])\s+", clean, maxsplit=1)[0].strip()
+    previous = None
+    while previous != clean:
+        previous = clean
+        clean = _ASSISTANT_TAIL.sub("", clean).strip()
+    clean = clean.rstrip(".!? ").strip()
+    return clean[:180] or "Complete the captured web task"

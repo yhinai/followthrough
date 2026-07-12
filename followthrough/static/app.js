@@ -153,7 +153,7 @@ function renderDesktop(doctor, actions) {
   setHTML("#desktopTimeline", actions.slice(0, 4).map((item, index) => `<li class="${index === 0 ? "current" : ""}"><i></i><span>${escapeHtml(label(item.action))}</span><small>${item.noop === 1 ? "Re-plan" : item.visual_changed === 1 ? "Verified" : "Recorded"}</small></li>`).join(""));
 }
 
-const AGENT_LIVE = new Set(["starting", "pending", "running"]);
+const AGENT_LIVE = new Set(["starting", "queued", "pending", "running"]);
 const AGENT_MAX_STEPS = 12;
 
 function formatAgentAnswer(value) {
