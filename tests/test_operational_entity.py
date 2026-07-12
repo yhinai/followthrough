@@ -90,6 +90,18 @@ def test_web_command_drops_trailing_instructions_to_the_assistant() -> None:
     ) == "check the price of the RTX 5080 on Best Buy"
 
 
+def test_explicit_search_overrides_conversational_prefix_sentences() -> None:
+    spoken = "No. No. No. Search the web and find how much caffeine content is in a Red Bull."
+    assert operational_entity(spoken, "web_task") == (
+        "Search the web and find how much caffeine content is in a Red Bull"
+    )
+
+
+def test_research_anchor_drops_unrelated_leading_conversation() -> None:
+    spoken = "Yeah, that makes sense. Research the latest World Cup schedule. Thanks."
+    assert operational_entity(spoken, "web_task") == "Research the latest World Cup schedule"
+
+
 def test_start_url_query_excludes_the_wake_word_and_assistant_tail() -> None:
     from followthrough.integrations import start_url
 

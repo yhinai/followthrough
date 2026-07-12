@@ -136,7 +136,34 @@ def test_natural_search_the_web_command_creates_a_web_job(configured_settings) -
     job = app.state.store.hermes_job_for_run(response.json()["run_id"])
     assert job is not None
     assert job["category"] == "web_task"
-    assert job["entity"] == spoken.rstrip(".")
+    assert job["entity"] == "search the web and figure out how much caffeine is in a Red Bull"
+
+
+def test_conversational_prefix_cannot_replace_explicit_search_task(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    spoken = "No. No. No. Search the web and find how much caffeine content is in a Red Bull."
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/transcripts",
+            headers=_auth(device_token),
+            json={
+                "event_id": "memo-prefixed-red-bull-0001",
+                "device_id": "memo-phone",
+                "text": spoken,
+                "source": "phone",
+                "consent": True,
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    expected = "Search the web and find how much caffeine content is in a Red Bull"
+    job = app.state.store.hermes_job_for_run(response.json()["run_id"])
+    source_event_id = response.json().get("aggregate_event_id", "memo-prefixed-red-bull-0001")
+    session = app.state.store.computer_session_for_event(source_event_id)
+    assert job is not None and job["entity"] == expected
+    assert session is not None and session["task"] == expected
 
 
 def test_book_noun_context_does_not_create_an_action(configured_settings) -> None:

@@ -160,6 +160,11 @@ def start_url(text: str) -> str | None:
 # buy something. Strip the wake word and the meta-instructions aimed at
 # Followthrough itself, and hand the agent the rest verbatim.
 _WAKE_WORD = re.compile(r"^\s*(?:hey\s+|ok\s+)?followthrough[\s,:-]+", re.I)
+_EXPLICIT_WEB_COMMAND = re.compile(
+    r"\b(?:search\s+(?:(?:the\s+)?(?:web|internet)|online|for|about)|"
+    r"research\b|look[ -]?up\b)",
+    re.I,
+)
 _ASSISTANT_TAIL = re.compile(
     r"[,\s]*(?:and\s+)?(?:then\s+)?(?:please\s+)?"
     r"(?:tell\s+me(?:\s+when\s+you(?:'re| are)?\s+done)?|let\s+me\s+know(?:\s+when.*)?|"
@@ -174,6 +179,13 @@ def web_task_command(text: str) -> str:
     clean = _WAKE_WORD.sub("", clean)
     for pattern in _CREDENTIAL_PATTERNS:
         clean = pattern.sub("[redacted credential]", clean)
+    # A finalized speech segment can contain conversational fragments before
+    # the real command ("No. No. No. Search the web..."). An explicit web
+    # command is a stronger boundary than sentence one, so discard everything
+    # before it before applying the normal single-sentence privacy bound.
+    explicit = _EXPLICIT_WEB_COMMAND.search(clean)
+    if explicit:
+        clean = clean[explicit.start() :]
     # The command is the first sentence; whatever was said afterwards is
     # surrounding conversation and must not reach the agent.
     clean = re.split(r"(?<=[.!?])\s+", clean, maxsplit=1)[0].strip()
