@@ -1,4 +1,4 @@
-"""Provider-neutral Orgo desktop control for Followthrough.
+"""Local-first desktop control for Followthrough.
 
 The local-vs-remote routing and visual no-op verification pattern is adapted
 from the MIT-licensed nickvasilescu/nicks-stack orgo-desktop-local plugin.
@@ -75,12 +75,12 @@ class DesktopRouter:
 
     @property
     def local_token(self) -> str:
-        return (self.settings.orgo_desktop_api_token or self.settings.vnc_password).strip()
+        return self.settings.desktop_api_token.strip()
 
     async def _local_health(self) -> dict[str, Any] | None:
         try:
             async with httpx.AsyncClient(timeout=1.5, transport=self.transport) as client:
-                response = await client.get(self.settings.orgo_local_base.rstrip("/") + "/health")
+                response = await client.get(self.settings.desktop_api_base.rstrip("/") + "/health")
                 response.raise_for_status()
                 value = response.json()
                 return value if isinstance(value, dict) else None
@@ -100,7 +100,7 @@ class DesktopRouter:
         health = await self._local_health()
         if health and self.local_token:
             return DesktopTarget(
-                "spark-local", None, self.settings.orgo_local_base.rstrip("/"), self.local_token
+                "spark-local", None, self.settings.desktop_api_base.rstrip("/"), self.local_token
             )
         if self.settings.orgo_api_key and self.settings.orgo_default_computer_id:
             return DesktopTarget(
@@ -110,9 +110,9 @@ class DesktopRouter:
                 self.settings.orgo_api_key,
             )
         if health and not self.local_token:
-            raise DesktopUnavailable("local Orgo Desktop API is present but its token is missing")
+            raise DesktopUnavailable("Spark Desktop API is present but its token is missing")
         raise DesktopUnavailable(
-            "no Orgo desktop is configured; set a local Desktop API token or ORGO_API_KEY and ORGO_DEFAULT_COMPUTER_ID"
+            "no desktop is configured; set FOLLOWTHROUGH_DESKTOP_API_TOKEN or configure the optional Orgo fallback"
         )
 
     @staticmethod
@@ -132,7 +132,7 @@ class DesktopRouter:
         action: str,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        timeout = max(5, self.settings.orgo_action_timeout_seconds)
+        timeout = max(5, self.settings.desktop_action_timeout_seconds)
         try:
             async with httpx.AsyncClient(
                 base_url=target.base_url,

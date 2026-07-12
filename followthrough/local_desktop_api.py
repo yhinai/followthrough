@@ -18,7 +18,7 @@ from Xlib.ext import xtest
 
 
 DISPLAY = os.getenv("DISPLAY", ":99")
-TOKEN = os.getenv("ORGO_DESKTOP_API_TOKEN", "").strip()
+TOKEN = os.getenv("FOLLOWTHROUGH_DESKTOP_API_TOKEN", "").strip()
 app = FastAPI(title="Followthrough Local Desktop", docs_url=None, redoc_url=None)
 
 

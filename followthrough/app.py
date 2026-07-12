@@ -24,7 +24,7 @@ from .config import Settings, settings
 from .controls import Capability, ControlPlane
 from .desktop import DesktopError, DesktopRouter
 from .hcompany import TERMINAL_STATES as H_TERMINAL_STATES, HCompanyExecutor
-from .integrations import operational_entity
+from .integrations import operational_entity, start_url
 from .models import (
     CapabilityControlIn,
     CapabilityLimitIn,
@@ -521,7 +521,9 @@ def create_app(config: Settings = settings) -> FastAPI:
             computer_use = start_computer_use(
                 subject,
                 source_event_id=payload.event_id,
-                start_url=payload.metadata.get("start_url"),
+                # Land the agent on the named site directly; the search-engine
+                # hop is where most steps and bot-checks were spent.
+                start_url=payload.metadata.get("start_url") or start_url(transcript),
             )
         return {
             "event_id": payload.event_id,
@@ -1128,7 +1130,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 "orgo_remote": bool(
                     config.orgo_api_key and config.orgo_default_computer_id
                 ),
-                "orgo_local": bool(desktop.local_token),
+                "spark_local": bool(desktop.local_token),
             },
         }
 

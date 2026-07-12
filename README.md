@@ -50,7 +50,7 @@ The local plane uses Xvfb, Openbox, Chromium, x11vnc, and the small FastAPI
 adapter in `followthrough/local_desktop_api.py`:
 
 ```env
-ORGO_DESKTOP_API_TOKEN=...
+FOLLOWTHROUGH_DESKTOP_API_TOKEN=...
 ```
 
 or the remote plane:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote_plus
 
 
 def entity(text: str) -> str:
@@ -93,3 +94,49 @@ def operational_entity(text: str, category: str) -> str:
     # A relevant signal without a bounded action clause stays useful but must
     # not leak the surrounding conversation into operational memory.
     return _BOUNDED_DEFAULT[category]
+
+
+# A spoken command usually names the site ("... on Best Buy"). Starting the
+# agent there skips the search-engine hop, which is where most of the steps and
+# most of the bot-check failures were spent.
+_SITE_SEARCH = {
+    "best buy": "https://www.bestbuy.com/site/searchpage.jsp?st={q}",
+    "bestbuy": "https://www.bestbuy.com/site/searchpage.jsp?st={q}",
+    "amazon": "https://www.amazon.com/s?k={q}",
+    "newegg": "https://www.newegg.com/p/pl?d={q}",
+    "ebay": "https://www.ebay.com/sch/i.html?_nkw={q}",
+    "walmart": "https://www.walmart.com/search?q={q}",
+    "target": "https://www.target.com/s?searchTerm={q}",
+    "github": "https://github.com/search?q={q}",
+    "hacker news": "https://hn.algolia.com/?q={q}",
+    "wikipedia": "https://en.wikipedia.org/w/index.php?search={q}",
+    "youtube": "https://www.youtube.com/results?search_query={q}",
+    "google flights": "https://www.google.com/travel/flights",
+    "booking": "https://www.booking.com/searchresults.html?ss={q}",
+    "airbnb": "https://www.airbnb.com/s/{q}/homes",
+}
+
+_STOPWORDS = re.compile(
+    r"\b(?:please|can|you|the|current|price|prices|of|for|an?|on|at|from|find|check|"
+    r"look\s+up|search|me|my|what(?:'s| is)|cost|how\s+much)\b",
+    re.I,
+)
+
+
+def start_url(text: str) -> str | None:
+    """Derive a direct starting page from a spoken command, when it names one."""
+    explicit = re.search(r"https?://[^\s]+", text)
+    if explicit:
+        return explicit.group(0).rstrip(".,)")
+    lowered = text.lower()
+    for site, template in _SITE_SEARCH.items():
+        if site not in lowered:
+            continue
+        if "{q}" not in template:
+            return template
+        query = _STOPWORDS.sub(" ", lowered.replace(site, " "))
+        query = " ".join(query.split())
+        if not query:
+            return template.split("?")[0]
+        return template.format(q=quote_plus(query))
+    return None

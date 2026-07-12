@@ -24,9 +24,9 @@ wm_pid=$!
 sleep 0.5
 
 DISPLAY="$display" /snap/bin/chromium \
-  --no-sandbox --disable-gpu --disable-dev-shm-usage \
+  --no-sandbox --test-type --disable-gpu --disable-dev-shm-usage \
   --disable-session-crashed-bubble --no-first-run --start-maximized \
-  --user-data-dir="$profile" https://example.com &
+  --user-data-dir="$profile" --app=https://hub.hcompany.ai/computer-use-agents/introduction &
 browser_pid=$!
 
 x11vnc -display "$display" -rfbport 5901 -localhost -forever -shared -nopw -quiet &

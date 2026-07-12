@@ -137,7 +137,7 @@ function renderDesktop(doctor, actions) {
     empty.hidden = true;
     if (doctor.provider === "spark-local") {
       frame.hidden = true; live.hidden = false;
-      if (!live.src) live.src = "/novnc/vnc_lite.html?autoconnect=true&resize=scale&path=api/desktop/vnc";
+      if (!live.src) live.src = "/static/desktop-viewer.html";
     } else {
       live.hidden = true; frame.hidden = false;
       frame.src = `/api/desktop/screenshot?t=${Date.now()}`;
@@ -150,13 +150,82 @@ function renderDesktop(doctor, actions) {
   $("#desktopVerification").textContent = action
     ? (action.noop === 1 ? "No visual change detected — the agent must re-plan." : action.visual_changed === 1 ? "Visual change verified from frame fingerprints." : "Action recorded without visual verification.")
     : "Before/after visual fingerprints will appear here.";
+  setHTML("#desktopTimeline", actions.slice(0, 4).map((item, index) => `<li class="${index === 0 ? "current" : ""}"><i></i><span>${escapeHtml(label(item.action))}</span><small>${item.noop === 1 ? "Re-plan" : item.visual_changed === 1 ? "Verified" : "Recorded"}</small></li>`).join(""));
+}
+
+const AGENT_LIVE = new Set(["starting", "pending", "running"]);
+const AGENT_MAX_STEPS = 30;
+
+function agentActionText(session) {
+  const raw = String(session.current_action || "");
+  // The raw H event is a JSON envelope; show the agent's thought when it has one.
+  const thought = raw.match(/"thought"\s*:\s*"([^"]{4,160})/);
+  if (thought) return thought[1];
+  const kind = raw.match(/^([A-Za-z]+Event)/);
+  if (kind) return kind[1].replace(/([a-z])([A-Z])/g, "$1 $2");
+  return raw.slice(0, 140) || "Working…";
+}
+
+function renderAgent(sessions) {
+  if (!$("#agentState")) return;
+  const list = Array.isArray(sessions) ? sessions : [];
+  const live = list.find((session) => AGENT_LIVE.has(session.state));
+  const session = live || list[0];
+  const chip = $("#agentState");
+  const card = $("#agentCurrent");
+
+  if (!session) {
+    chip.className = "agent-state idle";
+    setHTML("#agentState", "<i></i>Idle");
+    card.className = "agent-current empty";
+    return;
+  }
+
+  const running = AGENT_LIVE.has(session.state);
+  chip.className = `agent-state ${running ? "working" : escapeHtml(session.state)}`;
+  setHTML("#agentState", `<i></i>${running ? "Agent working" : escapeHtml(label(session.state))}`);
+  card.className = `agent-current ${running ? "working" : escapeHtml(session.state)}`;
+
+  $("#agentTask").textContent = session.task || "Web task";
+  $("#agentAction").textContent = running
+    ? agentActionText(session)
+    : (session.error ? String(session.error).slice(0, 160) : "Finished");
+  const steps = Number(session.step_count || 0);
+  $("#agentSteps").textContent = `${steps} step${steps === 1 ? "" : "s"}`;
+  $("#agentAgent").textContent = session.agent || "h/web-surfer-flash";
+  $("#agentBar").style.width = `${Math.min(100, Math.round((steps / AGENT_MAX_STEPS) * 100))}%`;
+
+  const replay = $("#agentReplay");
+  if (session.agent_view_url) {
+    replay.href = session.agent_view_url;
+    replay.hidden = false;
+  } else {
+    replay.hidden = true;
+  }
+
+  const answer = $("#agentAnswer");
+  if (session.state === "completed" && session.latest_answer) {
+    answer.hidden = false;
+    setHTML("#agentAnswer", `<small>Spoken back to the phone</small><p>${escapeHtml(session.latest_answer).slice(0, 700)}</p>`);
+  } else {
+    answer.hidden = true;
+  }
+
+  setHTML("#agentSessions", list.slice(0, 5).map((item) => `
+    <li class="agent-session ${escapeHtml(item.state)}">
+      <span class="agent-dot"></span>
+      <div><strong>${escapeHtml(String(item.task || "web task").slice(0, 70))}</strong>
+      <small>${escapeHtml(label(item.state))} · ${Number(item.step_count || 0)} steps · ${escapeHtml(timeAgo(item.updated_at))}</small></div>
+      ${item.agent_view_url ? `<a href="${escapeHtml(item.agent_view_url)}" target="_blank" rel="noopener">replay ↗</a>` : ""}
+    </li>`).join(""));
 }
 
 async function load() {
   try {
-    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions] = await Promise.all([
-      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions")
+    const [metrics, jobs, controls, memories, activity, desktopDoctor, desktopActions, agentSessions] = await Promise.all([
+      jsonApi("/api/metrics"), jsonApi("/api/jobs"), jsonApi("/api/controls"), jsonApi("/api/memory/operational"), jsonApi("/api/activity"), jsonApi("/api/desktop/doctor"), jsonApi("/api/desktop/actions"), jsonApi("/api/computer-use")
     ]);
+    renderAgent(agentSessions);
     const mode = controls.global.mode;
     const healthy = metrics.orchestrator?.status === "ok";
     const systemState = $("#systemState");

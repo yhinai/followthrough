@@ -52,3 +52,17 @@ def test_web_task_keeps_the_full_bounded_command() -> None:
     assert operational_entity(text, "web_task") == (
         "Book the cheapest flight from CDG to NRT on Saturday"
     )
+
+
+def test_start_url_lands_the_agent_on_the_named_site() -> None:
+    from followthrough.integrations import start_url
+
+    assert start_url("Check the price of the NVIDIA RTX 5080 on Best Buy") == (
+        "https://www.bestbuy.com/site/searchpage.jsp?st=nvidia+rtx+5080"
+    )
+    # An explicit link always wins over an inferred search page.
+    assert start_url("Research https://github.com/pypa/sampleproject") == (
+        "https://github.com/pypa/sampleproject"
+    )
+    # No named site: let the agent decide where to begin.
+    assert start_url("Book the cheapest flight to Tokyo") is None

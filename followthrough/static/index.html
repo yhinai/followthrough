@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f5ef">
   <title>Followthrough · Ambient operator</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-5">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-6">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -43,6 +43,28 @@
       <div class="overview-note"><span class="shield">◇</span><div><strong>Action boundary active</strong><small>Ordinary conversation stays archive-only and never enters operational memory.</small></div></div>
     </section>
 
+    <section class="panel agent-panel" aria-labelledby="agentTitle">
+      <div class="panel-head">
+        <div><p class="kicker">H Company computer-use agent</p><h2 id="agentTitle">What the agent is doing</h2></div>
+        <span id="agentState" class="agent-state idle"><i></i>Idle</span>
+      </div>
+      <div id="agentCurrent" class="agent-current empty">
+        <div class="agent-icon">H</div>
+        <div class="agent-copy">
+          <strong id="agentTask">No web task yet</strong>
+          <p id="agentAction">Say “check the price of…” or “book…” near the phone and the agent starts here.</p>
+          <div class="agent-meta">
+            <span id="agentSteps">0 steps</span>
+            <span id="agentAgent">h/web-surfer-flash</span>
+            <a id="agentReplay" class="agent-replay" href="#" target="_blank" rel="noopener" hidden>Watch the session ↗</a>
+          </div>
+          <div class="agent-progress"><i id="agentBar"></i></div>
+        </div>
+      </div>
+      <div id="agentAnswer" class="agent-answer" hidden></div>
+      <ol id="agentSessions" class="agent-sessions" aria-label="Recent agent sessions"></ol>
+    </section>
+
     <section class="panel desktop-panel" aria-labelledby="desktopTitle">
       <div class="panel-head">
         <div><p class="kicker">Computer use · Spark local control plane</p><h2 id="desktopTitle">Live agent desktop</h2></div>
@@ -60,6 +82,7 @@
         <div class="desktop-evidence">
           <div class="route-row"><span><small>Selected plane</small><strong id="desktopProvider">Unavailable</strong></span><span><small>Computer</small><strong id="desktopComputer">—</strong></span></div>
           <div class="last-action"><small>Latest verified action</small><strong id="desktopAction">No desktop action yet</strong><p id="desktopVerification">Before/after visual fingerprints will appear here.</p></div>
+          <ol id="desktopTimeline" class="desktop-timeline" aria-label="Recent desktop actions"></ol>
           <div class="desktop-tool-list" aria-label="Available desktop tools"><span>Screenshot</span><span>Click</span><span>Type</span><span>Key</span><span>Scroll</span><span>Drag</span></div>
           <button id="refreshDesktop" class="secondary" type="button">Refresh desktop</button>
         </div>
@@ -102,6 +125,6 @@
   </main>
 
   <footer><span>Followthrough</span><span>Hermes · NVIDIA Spark · Cloudflare edge</span><span>Built for conversations worth continuing.</span></footer>
-  <script src="/static/app.js?v=20260712-5"></script>
+  <script src="/static/app.js?v=20260712-6"></script>
 </body>
 </html>

@@ -49,8 +49,8 @@ async def test_local_plane_is_preferred_and_click_verifies_visual_change(tmp_pat
         reports_dir=tmp_path / "reports",
         jobs_dir=tmp_path / "jobs",
         audio_dir=tmp_path / "audio",
-        orgo_local_base="https://local.test",
-        orgo_desktop_api_token="local-token",
+        desktop_api_base="https://local.test",
+        desktop_api_token="local-token",
         orgo_api_key="remote-token",
         orgo_default_computer_id="remote-id",
     )
@@ -84,7 +84,7 @@ async def test_remote_default_routing_noop_and_bounded_lifecycle(tmp_path: Path)
         reports_dir=tmp_path / "reports",
         jobs_dir=tmp_path / "jobs",
         audio_dir=tmp_path / "audio",
-        orgo_local_base="https://local.test",
+        desktop_api_base="https://local.test",
         orgo_api_base="https://remote.test/api",
         orgo_api_key="remote-token",
         orgo_default_computer_id="computer-1",
@@ -109,7 +109,7 @@ async def test_unconfigured_router_fails_closed(tmp_path: Path) -> None:
         reports_dir=tmp_path / "reports",
         jobs_dir=tmp_path / "jobs",
         audio_dir=tmp_path / "audio",
-        orgo_local_base="https://local.test",
+        desktop_api_base="https://local.test",
     )
     transport = httpx.MockTransport(lambda _: httpx.Response(503))
     router = DesktopRouter(Store(settings.db_path), settings, transport)
@@ -134,7 +134,7 @@ def test_frame_fingerprint_ignores_top_panel() -> None:
 
 def test_desktop_http_surface_reports_unconfigured(configured_settings) -> None:
     settings, _, _ = configured_settings
-    settings.orgo_local_base = "http://127.0.0.1:1"
+    settings.desktop_api_base = "http://127.0.0.1:1"
     app = create_app(settings)
     with TestClient(app) as client:
         doctor = client.get("/api/desktop/doctor")

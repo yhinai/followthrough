@@ -103,7 +103,7 @@ units run it:
 - `followthrough-xdesktop.service` — Xvfb `:99` at 1280x800, openbox, and the
   demo apps (gedit + xterm).
 - `followthrough-desktop-api.service` — the loopback control plane on `:8080`,
-  authenticated with `ORGO_DESKTOP_API_TOKEN` from the private secrets file.
+  authenticated with `FOLLOWTHROUGH_DESKTOP_API_TOKEN` from the private secrets file.
 
 `DesktopRouter` prefers this local plane whenever it is healthy, so the live
 viewer on the dashboard works with no external spend.

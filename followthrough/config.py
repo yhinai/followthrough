@@ -54,10 +54,9 @@ class Settings(BaseSettings):
     orgo_api_key: str = Field("", validation_alias="ORGO_API_KEY")
     orgo_default_computer_id: str = Field("", validation_alias="ORGO_DEFAULT_COMPUTER_ID")
     orgo_api_base: str = "https://www.orgo.ai/api"
-    orgo_local_base: str = "http://127.0.0.1:8080"
-    orgo_desktop_api_token: str = Field("", validation_alias="ORGO_DESKTOP_API_TOKEN")
-    vnc_password: str = Field("", validation_alias="VNC_PASSWORD")
-    orgo_action_timeout_seconds: int = 60
+    desktop_api_base: str = "http://127.0.0.1:8080"
+    desktop_api_token: str = ""
+    desktop_action_timeout_seconds: int = 60
 
     def model_post_init(self, __context: object) -> None:
         self.db_path = Path(self.db_path).expanduser().resolve()
