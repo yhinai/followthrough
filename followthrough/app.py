@@ -565,14 +565,18 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.post("/api/webhooks/omi/audio", status_code=202)
     async def omi_audio(
         request: Request,
-        secret: str = Query(alias="token"),
+        secret: str | None = Query(default=None, alias="token"),
         uid: str = Query(min_length=1, max_length=200),
         sample_rate: int = Query(default=16_000, ge=8_000, le=96_000),
         timestamp: str | None = Query(default=None, max_length=100),
         sequence: str | None = Query(default=None, max_length=100),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        content_type: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+        x_followthrough_token: str | None = Header(default=None),
     ) -> dict[str, object]:
-        if not authority.device(secret):
+        device_secret = secret or token(authorization, x_followthrough_token)
+        if not device_secret or not authority.device(device_secret):
             raise HTTPException(status_code=401, detail="invalid Omi webhook secret")
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > config.max_audio_chunk_bytes:
@@ -597,7 +601,7 @@ def create_app(config: Settings = settings) -> FastAPI:
                 else "official_omi_unique_delivery"
             )
             idempotency_key = _omi_audio_delivery_key(
-                device_identity=hashlib.sha256(secret.encode()).hexdigest(),
+                device_identity=hashlib.sha256(device_secret.encode()).hexdigest(),
                 uid=uid,
                 sample_rate=sample_rate,
                 payload_digest=digest,
@@ -619,7 +623,9 @@ def create_app(config: Settings = settings) -> FastAPI:
             received_at = datetime.now(UTC)
             stream_id = f"omi:{uid}:{received_at.date().isoformat()}"
             stream_sequence = archive_store.allocate_stream_sequence(stream_id, uid, "omi")
-            duration_ms = round(len(body) / (sample_rate * 2) * 1000)
+            mime = (content_type or "application/octet-stream").split(";", 1)[0].lower()
+            pcm_delivery = mime in {"application/octet-stream", "audio/l16", "audio/pcm"}
+            duration_ms = round(len(body) / (sample_rate * 2) * 1000) if pcm_delivery else None
             empty = b""
             archived, created_event = archive_store.archive_event(
                 event_id=event_id,
@@ -630,14 +636,16 @@ def create_app(config: Settings = settings) -> FastAPI:
                 transcript_sha256=vault.digest(empty),
                 relevant=False,
                 classification="audio_only",
-                metadata={"sample_rate": sample_rate, "encoding": "pcm_s16le_mono", "idempotency_key": idempotency_key, "idempotency_source": idempotency_source, "omi_timestamp": timestamp, "omi_sequence": sequence, "capture_stream_id": stream_id, "stream_sequence": stream_sequence, "duration_ms": duration_ms, "alignment": "arrival_time_estimate"},
+                metadata={"sample_rate": sample_rate if pcm_delivery else None, "encoding": "pcm_s16le_mono" if pcm_delivery else mime, "idempotency_key": idempotency_key, "idempotency_source": idempotency_source, "omi_timestamp": timestamp, "omi_sequence": sequence, "capture_stream_id": stream_id, "stream_sequence": stream_sequence, "duration_ms": duration_ms, "alignment": "arrival_time_estimate"},
             )
         existing = archive_store.audio_chunk(archived["id"], 0)
         if existing:
             if existing["plaintext_sha256"] != digest:
                 raise HTTPException(status_code=409, detail="Omi audio idempotency key reused with different bytes")
             return {"event_id": event_id, "created": False, "plaintext_sha256": digest, "plaintext_bytes": len(body)}
-        mime = "audio/L16"
+        mime = (content_type or "application/octet-stream").split(";", 1)[0].lower()
+        if mime == "application/octet-stream":
+            mime = "audio/L16"
         associated_data = f"audio:{event_id}:0:{mime}:{digest}".encode()
         path = vault.write_audio(archived["id"], 0, body, associated_data)
         _, created_chunk = archive_store.add_audio_chunk(archived["id"], 0, str(path), mime, digest, len(body))

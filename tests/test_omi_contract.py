@@ -128,3 +128,25 @@ def test_official_omi_audio_timestamp_restores_retry_idempotency(configured_sett
     assert json.loads(archived["metadata_json"])["idempotency_source"] == (
         "official_omi_derived"
     )
+
+
+def test_omi_audio_preserves_compressed_content_type(configured_settings) -> None:
+    settings, _, device_token = configured_settings
+    app = create_app(settings)
+    payload = b"\x00\x00\x00\x18ftypmp42" + b"compressed-audio" * 100
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/webhooks/omi/audio?uid=termux&timestamp=chunk-1",
+            content=payload,
+            headers={
+                "Content-Type": "audio/mp4",
+                "Authorization": f"Bearer {device_token}",
+            },
+        )
+    assert response.status_code == 202
+    event = app.state.archive_store.by_event(response.json()["event_id"])
+    chunk = app.state.archive_store.audio_chunk(event["id"], 0)
+    assert chunk["mime_type"] == "audio/mp4"
+    metadata = json.loads(event["metadata_json"])
+    assert metadata["encoding"] == "audio/mp4"
+    assert metadata["duration_ms"] is None

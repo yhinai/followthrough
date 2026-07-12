@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,17 @@ WHISPER = re.compile(
     r"(?P<clock>\d\d:\d\d:\d\d(?:\.\d+)?)\s+.*?"
     r"\[OnDeviceWhisper\]\s+Transcribed\s+.*?\s+Text:\s*(?P<text>.+?)\s*$"
 )
+ACTION = re.compile(
+    r"\b(research|investigate|test|evaluate|clone|check|find|look[ -]?up|benchmark|"
+    r"remind|schedule|add|send|message|email|deploy|purchase|buy)\b",
+    re.I,
+)
+SUBJECT = re.compile(
+    r"\b(github|repo(?:sitory)?|tool|framework|library|sdk|api|startup|company|"
+    r"event|calendar|meeting|task|todo|to-do|hermes|agent|automation)\b|"
+    r"(?:https?://)?github\.com/[\w.-]+/[\w.-]+",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -26,6 +38,44 @@ class Transcript:
     event_id: str
     occurred_at: str
     text: str
+
+
+class TranscriptAggregator:
+    """Join short Whisper segments only when they form an explicit command.
+
+    Individual segments are archived first. This buffer emits a second,
+    content-addressed event only when an action verb and an actionable subject
+    occur inside the bounded window, preventing ordinary ambient speech from
+    reaching Hermes memory or the action runtime.
+    """
+
+    def __init__(self, *, window_seconds: float = 45, max_segments: int = 12) -> None:
+        self.window_seconds = window_seconds
+        self.max_segments = max_segments
+        self._segments: deque[tuple[float, Transcript]] = deque()
+
+    def add(self, transcript: Transcript, *, monotonic_at: float | None = None) -> Transcript | None:
+        observed = time.monotonic() if monotonic_at is None else monotonic_at
+        self._segments.append((observed, transcript))
+        cutoff = observed - self.window_seconds
+        while self._segments and (
+            self._segments[0][0] < cutoff or len(self._segments) > self.max_segments
+        ):
+            self._segments.popleft()
+
+        text = " ".join(item.text.strip() for _, item in self._segments if item.text.strip())
+        if not (ACTION.search(text) and SUBJECT.search(text)):
+            return None
+
+        occurred_at = self._segments[0][1].occurred_at
+        component_ids = "\0".join(item.event_id for _, item in self._segments)
+        digest = hashlib.sha256(f"{component_ids}\0{text}".encode()).hexdigest()
+        self._segments.clear()
+        return Transcript(
+            event_id=f"adb-omi:aggregate:{digest}",
+            occurred_at=occurred_at,
+            text=text,
+        )
 
 
 def parse_whisper_line(line: str, *, day: datetime | None = None) -> Transcript | None:
@@ -83,6 +133,7 @@ class AdbTranscriptBridge:
         self.endpoint = endpoint
         self.adb = adb
         self.receipts = receipts
+        self.aggregator = TranscriptAggregator()
 
     def _record(self, payload: dict[str, object]) -> None:
         if not self.receipts:
@@ -140,7 +191,11 @@ class AdbTranscriptBridge:
                 for line in logcat_lines(self.adb, self.serial):
                     transcript = parse_whisper_line(line)
                     if transcript:
-                        self.deliver(transcript)
+                        result = self.deliver(transcript)
+                        if result.get("status") == "archived":
+                            aggregate = self.aggregator.add(transcript)
+                            if aggregate:
+                                self.deliver(aggregate)
             except Exception as exc:
                 self._record(
                     {
