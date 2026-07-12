@@ -51,6 +51,27 @@ Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary 
 | Owner surfaces | Memo spoken result, live web dashboard, optional Hermes Discord DM |
 | Verification | Pytest/Ruff, Android Gradle build, public health checks, and optional bounded monitoring |
 
+## Typed workflow verification
+
+Verified live on 2026-07-12 PDT:
+
+- Private task `4c11a9cb-7b70-4adb-8ea0-a1da9df765d2` executed through
+  `followthrough-private-tasks` and was rolled back to cancelled.
+- Calendar effect `c7f16e5e-1a5f-4dd5-b195-802b16dfa9cb` created a real
+  primary-calendar event with attendee notifications disabled and then deleted it.
+- Discord transport delivered verification message
+  `1525784068417917028` to the configured owner channel.
+- Sandbox purchase effect `3285dd4f-969c-453d-9eae-fdf96f3e4c31`
+  authorized one cent in test mode and was then voided. No real payment moved.
+- Deployment effect `fdb8b9de-16f6-400d-b7a7-2f5dd967dad4` reached the
+  durable `dry_run` state. The lean repository intentionally has no deploy
+  workflow, so no deployment was dispatched.
+
+Each effect has an append-only transition history in `data/effects/effects.db`.
+Repository acquisition/testing and Hermes research were separately proven by
+completed job `25a6bfb0-c066-4398-a17b-62ed90ddd9b0` and Kanban task
+`t_f9028478`.
+
 ## Current revisions
 
 - Followthrough: branch `main`; this document is shipped with the lean tokenless runtime revision.
