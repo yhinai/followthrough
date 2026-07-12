@@ -159,7 +159,9 @@ def start_url(text: str) -> str | None:
 # hunting for a verb matched "Buy" inside "Best Buy" and sent the agent off to
 # buy something. Strip the wake word and the meta-instructions aimed at
 # Followthrough itself, and hand the agent the rest verbatim.
-_WAKE_WORD = re.compile(r"^\s*(?:hey\s+|ok\s+)?followthrough[\s,:-]+", re.I)
+_WAKE_WORD = re.compile(
+    r"\b(?:(?:hey|ok)\s+)?(?:followthrough|memo|nemo)[\s,:-]+", re.I
+)
 _EXPLICIT_WEB_COMMAND = re.compile(
     r"\b(?:search\s+(?:(?:the\s+)?(?:web|internet)|online|for|about)|"
     r"research\b|look[ -]?up\b)",
@@ -176,7 +178,14 @@ _ASSISTANT_TAIL = re.compile(
 def web_task_command(text: str) -> str:
     clean = " ".join(text.split())
     clean = _FILLER.sub("", clean)
-    clean = _WAKE_WORD.sub("", clean)
+    # Live speech often includes a short conversational fragment before the
+    # wake word ("Yeah. Memo, what's the weather?").  The wake word is the
+    # authoritative command boundary; discard the prefix instead of sending
+    # the H agent a meaningless first sentence such as "Yeah".  Accept Nemo as
+    # a common ASR rendering of the product name.
+    wake = _WAKE_WORD.search(clean)
+    if wake:
+        clean = clean[wake.end() :].strip()
     for pattern in _CREDENTIAL_PATTERNS:
         clean = pattern.sub("[redacted credential]", clean)
     # A finalized speech segment can contain conversational fragments before

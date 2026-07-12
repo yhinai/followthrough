@@ -54,6 +54,18 @@ def test_web_task_keeps_the_full_bounded_command() -> None:
     )
 
 
+def test_memo_wake_word_after_conversation_is_the_command_boundary() -> None:
+    assert operational_entity("Yeah. Memo, what's the weather?", "web_task") == (
+        "what's the weather"
+    )
+
+
+def test_nemo_asr_alias_is_removed_from_h_agent_task() -> None:
+    assert operational_entity("Nemo, how far is the moon from Earth?", "web_task") == (
+        "how far is the moon from Earth"
+    )
+
+
 def test_start_url_lands_the_agent_on_the_named_site() -> None:
     from followthrough.integrations import start_url
 
