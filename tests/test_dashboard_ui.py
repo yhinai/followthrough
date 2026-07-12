@@ -18,8 +18,10 @@ def test_dashboard_has_accessible_command_surface():
     assert ".command-bar" in css
 
 
-def test_desktop_viewer_mounts_directly_without_an_iframe():
+def test_desktop_viewer_uses_the_reliable_screenshot_stream():
     html = HTML.read_text()
-    assert 'id="desktopLive"' in html
-    assert 'src="/static/desktop-live.js' in html
+    js = JS.read_text()
+    assert 'id="desktopFrame"' in html
+    assert "/api/desktop/screenshot?t=" in js
     assert '<iframe id="desktopLive"' not in html
+    assert 'id="desktopLive"' not in html

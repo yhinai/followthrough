@@ -124,7 +124,6 @@ function renderCurrentJob(jobs, activity) {
 function renderDesktop(doctor, actions) {
   const state = $("#desktopState");
   const frame = $("#desktopFrame");
-  const live = $("#desktopLive");
   const empty = $("#desktopEmpty");
   state.className = `desktop-state ${doctor.ready ? "online" : "offline"}`;
   state.innerHTML = `<i></i>${doctor.ready ? "Live" : "Not configured"}`;
@@ -137,11 +136,10 @@ function renderDesktop(doctor, actions) {
     empty.hidden = true;
     // Every plane paints from the screenshot stream. The VNC canvas needed a
     // connector that was never wired, so the panel sat on "Connecting…".
-    live.hidden = true;
     frame.hidden = false;
     frame.src = `/api/desktop/screenshot?t=${Date.now()}`;
   } else {
-    frame.hidden = true; live.hidden = true; empty.hidden = false;
+    frame.hidden = true; empty.hidden = false;
   }
   const action = actions[0];
   $("#desktopAction").textContent = action ? label(action.action) : "No desktop action yet";
