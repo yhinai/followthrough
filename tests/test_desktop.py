@@ -142,3 +142,30 @@ def test_desktop_http_surface_reports_unconfigured(configured_settings) -> None:
         assert doctor.json()["ready"] is False
         assert client.get("/api/desktop/screenshot").status_code == 503
         assert client.get("/api/desktop/actions").json() == []
+
+
+
+def test_desktop_screenshot_is_served_for_the_dashboard_panel(
+    configured_settings, monkeypatch
+) -> None:
+    """The panel paints from this endpoint. When it stops serving an image the
+    viewer goes blank and the desktop only looks dead."""
+    settings, _, _ = configured_settings
+    image = png("green")
+
+    async def fake_screenshot(self, computer_id=None):
+        return image, {
+            "provider": "spark-local",
+            "computer_id": None,
+            "width": 1280,
+            "height": 720,
+            "fingerprint": "abc",
+        }
+
+    monkeypatch.setattr(DesktopRouter, "screenshot", fake_screenshot)
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/api/desktop/screenshot")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/")
+    assert response.content == image

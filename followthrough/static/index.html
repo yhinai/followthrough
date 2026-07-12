@@ -80,7 +80,7 @@
         <div class="desktop-viewer">
           <div class="desktop-chrome"><span><i></i><i></i><i></i></span><b id="desktopRoute">Automatic routing</b><small id="desktopResolution">—</small></div>
           <div class="desktop-screen">
-            <iframe id="desktopLive" title="Live Spark agent desktop" hidden></iframe>
+            <div id="desktopLive" class="desktop-live" aria-label="Live Spark agent desktop" hidden><span id="desktopLiveStatus">Connecting…</span></div>
             <img id="desktopFrame" alt="Remote agent desktop" hidden>
             <div id="desktopEmpty" class="desktop-empty"><span>⌁</span><strong>Desktop waiting</strong><small>Spark’s local desktop is preferred; Orgo remains an optional remote fallback.</small></div>
           </div>
@@ -131,6 +131,7 @@
   </main>
 
   <footer><span>Followthrough</span><span>Hermes · NVIDIA Spark · Cloudflare edge</span><span>Built for conversations worth continuing.</span></footer>
-  <script src="/static/app.js?v=20260712-8"></script>
+  <script src="/static/app.js?v=20260712-9"></script>
+  <script type="module" src="/static/desktop-live.js?v=20260712-9"></script>
 </body>
 </html>

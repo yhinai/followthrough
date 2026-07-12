@@ -135,13 +135,11 @@ function renderDesktop(doctor, actions) {
   $("#desktopResolution").textContent = shot.width ? `${shot.width} × ${shot.height}` : "—";
   if (doctor.ready) {
     empty.hidden = true;
-    if (doctor.provider === "spark-local") {
-      frame.hidden = true; live.hidden = false;
-      if (!live.src) live.src = "/static/desktop-viewer.html";
-    } else {
-      live.hidden = true; frame.hidden = false;
-      frame.src = `/api/desktop/screenshot?t=${Date.now()}`;
-    }
+    // Every plane paints from the screenshot stream. The VNC canvas needed a
+    // connector that was never wired, so the panel sat on "Connecting…".
+    live.hidden = true;
+    frame.hidden = false;
+    frame.src = `/api/desktop/screenshot?t=${Date.now()}`;
   } else {
     frame.hidden = true; live.hidden = true; empty.hidden = false;
   }

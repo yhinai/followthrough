@@ -1,10 +1,5 @@
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
-from followthrough.app import create_app
-
-
 ROOT = Path(__file__).parents[1]
 HTML = ROOT / "followthrough/static/index.html"
 CSS = ROOT / "followthrough/static/dashboard.css"
@@ -23,10 +18,8 @@ def test_dashboard_has_accessible_command_surface():
     assert ".command-bar" in css
 
 
-def test_embedded_desktop_viewer_allows_same_origin_framing(configured_settings):
-    settings, _, _ = configured_settings
-    with TestClient(create_app(settings)) as client:
-        response = client.get("/static/desktop-viewer.html")
-    assert response.status_code == 200
-    assert response.headers["x-frame-options"] == "SAMEORIGIN"
-    assert "frame-ancestors 'self'" in response.headers["content-security-policy"]
+def test_desktop_viewer_mounts_directly_without_an_iframe():
+    html = HTML.read_text()
+    assert 'id="desktopLive"' in html
+    assert 'src="/static/desktop-live.js' in html
+    assert '<iframe id="desktopLive"' not in html
