@@ -216,7 +216,7 @@ def create_app(config: Settings = settings) -> FastAPI:
     config.reports_dir.mkdir(parents=True, exist_ok=True)
     store = Store(config.db_path)
     archive_store = ArchiveStore(config.archive_db_path)
-    vault = ArchiveVault(config.archive_key_file, config.audio_dir)
+    vault = ArchiveVault(config.archive_key_file, config.audio_dir, encrypt_writes=config.encrypt_archive)
     authority = TokenAuthority(config.dashboard_token_file, config.device_tokens_dir, config.require_auth)
     crew = Crew(store, config)
     controls = ControlPlane(store)
@@ -458,8 +458,8 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.get("/healthz")
     async def healthz() -> dict[str, object]:
         database_ready = bool(store.db.execute("SELECT 1").fetchone()[0])
-        archive_ready = vault.key_file.is_file() and archive_store.integrity_check()
-        auth_ready = authority.ready()
+        archive_ready = archive_store.integrity_check() and (vault.key_file.is_file() if config.encrypt_archive else True)
+        auth_ready = authority.ready() if config.require_auth else True
         orchestrator = store.heartbeat_status("orchestrator") if config.kanban_enabled else None
         return {
             "ok": database_ready and archive_ready and auth_ready,
@@ -467,7 +467,9 @@ def create_app(config: Settings = settings) -> FastAPI:
             "version": "0.2.0",
             "database_ready": database_ready,
             "archive_ready": archive_ready,
+            "archive_encrypted": vault.encrypt_writes,
             "auth_ready": auth_ready,
+            "auth_required": config.require_auth,
             "hermes_cli_present": shutil.which(config.hermes_bin) is not None,
             "orchestrator": orchestrator,
             "job_counts": store.hermes_job_counts(),
@@ -636,7 +638,7 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.post("/api/webhooks/omi/transcript", status_code=202)
     async def omi_transcript(
         request: Request,
-        secret: str = Query(alias="token"),
+        secret: str = Query(default="", alias="token"),
         uid: str = Query(min_length=1, max_length=200),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> dict[str, object]:
@@ -660,7 +662,7 @@ def create_app(config: Settings = settings) -> FastAPI:
     @application.post("/api/webhooks/omi/conversation", status_code=202)
     async def omi_conversation(
         request: Request,
-        secret: str = Query(alias="token"),
+        secret: str = Query(default="", alias="token"),
         uid: str = Query(min_length=1, max_length=200),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> dict[str, object]:
@@ -694,8 +696,8 @@ def create_app(config: Settings = settings) -> FastAPI:
         authorization: str | None = Header(default=None),
         x_followthrough_token: str | None = Header(default=None),
     ) -> dict[str, object]:
-        device_secret = secret or token(authorization, x_followthrough_token)
-        if not device_secret or not authority.device(device_secret):
+        device_secret = secret or token(authorization, x_followthrough_token) or ""
+        if not authority.device(device_secret):
             raise HTTPException(status_code=401, detail="invalid Omi webhook secret")
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > config.max_audio_chunk_bytes:

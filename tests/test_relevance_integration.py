@@ -243,7 +243,7 @@ def test_interest_mute_and_owner_correction_are_applied(configured_settings) -> 
 def test_legacy_ciphertext_archive_migrates_before_source_rows_are_purged(configured_settings) -> None:
     settings, _, _ = configured_settings
     legacy = Store(settings.db_path)
-    vault = ArchiveVault(settings.archive_key_file, settings.audio_dir)
+    vault = ArchiveVault(settings.archive_key_file, settings.audio_dir, encrypt_writes=True)
     raw = b"legacy encrypted source"
     event_id = "legacy-split-event-01"
     archived, _ = legacy.archive_event(

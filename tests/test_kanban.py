@@ -168,6 +168,26 @@ def test_create_goal_uses_a_safe_exact_argv_and_robust_json(tmp_path: Path) -> N
     assert 0 < kwargs["timeout"] <= MAX_TIMEOUT_SECONDS
 
 
+def test_create_goal_uses_supplied_supersession_idempotency_key(tmp_path: Path) -> None:
+    path = CapsuleWriter(tmp_path).write(
+        TaskCapsule("run-1", "archive-1", "repo", "owner/repo", "evaluate", ("report",))
+    )
+    runner = FakeRunner([completed('{"id":"task-8","status":"ready"}')])
+    client = HermesKanbanClient(runner=runner)
+    key = "followthrough:archive-1:research:v4"
+
+    receipt = client.create_goal_card(
+        run_id="run-1",
+        archive_id="archive-1",
+        capsule_path=path,
+        idempotency_key=key,
+    )
+
+    argv = runner.calls[0][0]
+    assert argv[argv.index("--idempotency-key") + 1] == key
+    assert receipt.idempotency_key == key
+
+
 def test_discord_subscription_is_verified_and_inspection_commands_are_json() -> None:
     runner = FakeRunner(
         [
@@ -306,6 +326,7 @@ class FakeStore:
                 "entity": "owner/repo",
                 "intent": "evaluate fit",
                 "acceptance": ["cited report"],
+                "idempotency_key": "followthrough:archive-1:research:v3",
                 "transcript": SECRET_TRANSCRIPT,
             }
         ]
@@ -373,6 +394,7 @@ class FakeClient:
         archive_id: str,
         capsule_path: str | Path,
         runner_evidence: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> CardReceipt:
         self.created_paths.append(Path(capsule_path))
         return CardReceipt(
@@ -468,6 +490,14 @@ class FakeEffectService:
         return {"state": "completed"}
 
 
+class FailOnceEffectService(FakeEffectService):
+    def submit(self, request: Any, *, idempotency_key: str, execute: bool) -> dict[str, Any]:
+        self.calls.append((request, idempotency_key, execute))
+        if len(self.calls) == 1:
+            raise RuntimeError("temporary provider outage")
+        return {"state": "completed"}
+
+
 def test_completed_card_dispatches_typed_effect_with_event_bound_idempotency(
     tmp_path: Path,
 ) -> None:
@@ -494,6 +524,61 @@ def test_completed_card_dispatches_typed_effect_with_event_bound_idempotency(
         "followthrough:event-12345678:effect:private_task.create:v1"
     )
     assert execute is True
+
+
+def test_transient_effect_failure_retries_before_terminal_reconciliation(tmp_path: Path) -> None:
+    store = FakeStore()
+    store.create_rows = []
+    store.notification_rows = []
+    effects = FailOnceEffectService()
+    orchestrator = DurableOrchestrator(
+        client=CompletedEffectClient(),  # type: ignore[arg-type]
+        store=store,
+        capsule_writer=CapsuleWriter(tmp_path),
+        effect_service=effects,  # type: ignore[arg-type]
+    )
+
+    first = orchestrator.run_once()
+    assert first["effects"] == 0
+    assert store.reconciled == []
+    assert first["errors"][0]["phase"] == "reconcile"
+
+    second = orchestrator.run_once()
+    assert second["effects"] == 1
+    assert len(store.reconciled) == 1
+    assert len(effects.calls) == 2
+    assert effects.calls[0][1] == effects.calls[1][1]
+
+
+class CreateRaceStore(FakeStore):
+    def kanban_record_created(self, run_id: str, **kwargs: Any) -> bool:
+        self.created.append((run_id, kwargs))
+        return False
+
+
+class CreateRaceClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parked: list[tuple[str, str]] = []
+
+    def park_task(self, task_id: str, *, reason_code: str) -> Mapping[str, Any]:
+        self.parked.append((task_id, reason_code))
+        return {"task_id": task_id, "status": "ready", "assignee": "none"}
+
+
+def test_orchestrator_parks_card_when_local_state_changed_during_create(tmp_path: Path) -> None:
+    store = CreateRaceStore()
+    store.notification_rows = []
+    store.active_rows = []
+    client = CreateRaceClient()
+    result = DurableOrchestrator(
+        client=client,  # type: ignore[arg-type]
+        store=store,
+        capsule_writer=CapsuleWriter(tmp_path),
+    ).run_once()
+
+    assert result["created"] == 1
+    assert client.parked == [("task-1", "state_changed_during_create")]
 
 
 class NotificationFailureClient(FakeClient):

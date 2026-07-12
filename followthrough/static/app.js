@@ -4,22 +4,19 @@ let browserListening = false;
 let recognition = null;
 let lastActivityId = null;
 
-function dashboardToken(force = false) {
-  let value = force ? "" : localStorage.getItem("followthrough_dashboard_token");
-  if (!value) {
-    value = window.prompt("Enter your Followthrough dashboard token") || "";
-    if (value) localStorage.setItem("followthrough_dashboard_token", value.trim());
-  }
-  return value.trim();
+function dashboardToken() {
+  return (localStorage.getItem("followthrough_dashboard_token") || "").trim();
 }
 
 async function api(path, options = {}, retry = true) {
   const headers = new Headers(options.headers || {});
-  headers.set("Authorization", `Bearer ${dashboardToken()}`);
+  const token = dashboardToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(path, {...options, headers});
   if (response.status === 401 && retry) {
     localStorage.removeItem("followthrough_dashboard_token");
-    dashboardToken(true);
+    const value = (window.prompt("Enter your Followthrough dashboard token") || "").trim();
+    if (value) localStorage.setItem("followthrough_dashboard_token", value);
     return api(path, options, false);
   }
   if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);

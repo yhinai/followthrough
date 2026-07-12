@@ -171,7 +171,24 @@ _TEXT_SUFFIXES = {
     ".py",
     ".rb",
     ".rs",
+    ".bash",
+    ".cs",
+    ".fish",
+    ".gradle",
+    ".groovy",
+    ".h",
+    ".hpp",
+    ".kts",
+    ".lua",
+    ".php",
+    ".pl",
+    ".pm",
+    ".ps1",
+    ".scala",
     ".sh",
+    ".sql",
+    ".swift",
+    ".zsh",
     ".toml",
     ".ts",
     ".tsx",
@@ -380,17 +397,28 @@ class NativeRepositoryRunner:
                 )
             if lower_name.startswith(("license", "copying", "notice")):
                 license_files.append(str(relative))
-                sample = path.read_text(errors="replace")[:64_000]
+                with path.open("r", encoding="utf-8", errors="replace") as stream:
+                    sample = stream.read(64_000)
                 detected_licenses.add(self._license_name(sample))
             if lower_name == "package.json":
                 package_json.append(path)
-            if size > 1024 * 1024 or not self._looks_textual(path):
+            if not self._looks_textual(path):
                 continue
             try:
-                content = path.read_text(errors="replace")
+                with path.open("r", encoding="utf-8", errors="replace") as stream:
+                    content = stream.read(1024 * 1024)
             except OSError as exc:
                 findings.append(Finding("medium", "READ_ERROR", str(relative), str(exc)))
                 continue
+            if size > 1024 * 1024:
+                findings.append(
+                    Finding(
+                        "medium",
+                        "STATIC_SCAN_TRUNCATED",
+                        str(relative),
+                        "static scan inspected only the first 1048576 bytes",
+                    )
+                )
             bytes_scanned += len(content.encode("utf-8", errors="replace"))
             for severity, code, pattern, detail in _SUSPICIOUS_PATTERNS:
                 if pattern.search(content):

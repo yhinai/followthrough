@@ -166,11 +166,11 @@ class AdbTranscriptBridge:
         os.chmod(self.receipts, 0o600)
 
     def deliver(self, transcript: Transcript) -> dict[str, object]:
-        token = self.token_file.read_text().strip()
+        token = self.token_file.read_text().strip() if self.token_file.is_file() else ""
         started = time.monotonic()
         response = httpx.post(
             self.endpoint,
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"Authorization": f"Bearer {token}"} if token else {},
             json={
                 "event_id": transcript.event_id,
                 "device_id": self.serial,

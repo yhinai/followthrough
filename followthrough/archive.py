@@ -17,9 +17,17 @@ class ArchiveIntegrityError(ValueError):
 
 
 class ArchiveVault:
-    def __init__(self, key_file: Path, audio_dir: Path) -> None:
+    """Stores archive payloads. Encryption is opt-in via ``encrypt_writes``
+    (off by default for proof-of-concept runs, so payloads are stored as
+    plaintext). Data written while encryption was on stays readable — those
+    envelopes carry the MAGIC prefix and are decrypted with the key file;
+    plaintext payloads pass through untouched.
+    """
+
+    def __init__(self, key_file: Path, audio_dir: Path, encrypt_writes: bool = False) -> None:
         self.key_file = key_file
         self.audio_dir = audio_dir
+        self.encrypt_writes = encrypt_writes
         self.audio_dir.mkdir(parents=True, exist_ok=True)
 
     def _key(self) -> bytes:
@@ -32,11 +40,15 @@ class ArchiveVault:
         return key
 
     def encrypt(self, plaintext: bytes, associated_data: bytes) -> bytes:
+        if not self.encrypt_writes:
+            return plaintext
         nonce = secrets.token_bytes(12)
         return MAGIC + nonce + AESGCM(self._key()).encrypt(nonce, plaintext, associated_data)
 
     def decrypt(self, envelope: bytes, associated_data: bytes) -> bytes:
-        if len(envelope) < len(MAGIC) + 12 + 16 or not envelope.startswith(MAGIC):
+        if not envelope.startswith(MAGIC):
+            return envelope
+        if len(envelope) < len(MAGIC) + 12 + 16:
             raise ArchiveIntegrityError("invalid archive envelope")
         nonce = envelope[len(MAGIC) : len(MAGIC) + 12]
         ciphertext = envelope[len(MAGIC) + 12 :]

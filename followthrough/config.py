@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, env_prefix="FOLLOWTHROUGH_", extra="ignore")
 
     public_url: str = "http://127.0.0.1:18765"
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"
     port: int = 18765
     db_path: Path = ROOT / "data" / "followthrough.db"
     archive_db_path: Path = ROOT / "data" / "archive" / "archive.db"
@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     dashboard_token_file: Path = Path.home() / ".config" / "followthrough" / "dashboard.token"
     device_tokens_dir: Path = Path.home() / ".config" / "followthrough" / "devices"
     archive_key_file: Path = Path.home() / ".config" / "followthrough" / "archive.key"
-    require_auth: bool = True
+    require_auth: bool = False
+    encrypt_archive: bool = False
     max_transcript_bytes: int = 65_536
     max_audio_chunk_bytes: int = 8_388_608
     # Upper bound on a single event's audio chunk index. Bounds the manifest's

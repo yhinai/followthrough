@@ -28,4 +28,6 @@ Claude Code 2.1.207 ran from the Followthrough repository with model `fable`, hi
 
 Follow-up implementation completed aggregate prefix privacy, aggregate replay idempotency, cross-process control-audit serialization, and atomic audio file/manifest persistence. The independently rerun suite is now 173 passed.
 
-Remaining structural work includes durable effect retry/outbox behavior, parked-job reconciliation races, supersession idempotency, bounded poison-job retries, broader static scan coverage, key rotation/permission checks, device-aggregator eviction, and query-token compatibility risk. These remain explicit plan items rather than being hidden behind the passing suite.
+Follow-up orchestration work now keeps typed effects retryable until terminal reconciliation, parks external cards when emergency controls win a create race, forwards supersession idempotency keys to Hermes, and dead-letters create/notification poison jobs after five attempts. Static inspection now covers common shell/runtime extensions and scans the first MiB of oversized textual files. The independently rerun suite is now 180 passed.
+
+Remaining structural work includes archive-key rotation/permission checks, device-aggregator eviction, and the stock-Omi query-token compatibility risk. These remain explicit plan items rather than being hidden behind the passing suite.

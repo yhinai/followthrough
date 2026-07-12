@@ -10,7 +10,7 @@ from followthrough.archive import ArchiveIntegrityError, ArchiveVault
 def test_aes_gcm_round_trip_and_tamper_detection(tmp_path: Path) -> None:
     key = tmp_path / "archive.key"
     key.write_bytes(bytes(range(32)))
-    vault = ArchiveVault(key, tmp_path / "audio")
+    vault = ArchiveVault(key, tmp_path / "audio", encrypt_writes=True)
     associated_data = b"transcript:event-123"
     encrypted = vault.encrypt(b"private conversation", associated_data)
     assert b"private conversation" not in encrypted
@@ -23,7 +23,7 @@ def test_aes_gcm_round_trip_and_tamper_detection(tmp_path: Path) -> None:
 def test_audio_file_is_ciphertext(tmp_path: Path) -> None:
     key = tmp_path / "archive.key"
     key.write_bytes(bytes(range(32)))
-    vault = ArchiveVault(key, tmp_path / "audio")
+    vault = ArchiveVault(key, tmp_path / "audio", encrypt_writes=True)
     payload = b"RIFF-demo-audio-bytes"
     associated_data = b"audio:event-123:0:audio/wav:digest"
     path = vault.write_audio("archive-123", 0, payload, associated_data)

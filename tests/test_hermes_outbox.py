@@ -87,6 +87,89 @@ def test_policy_revision_supersedes_and_audits_parked_task(tmp_path) -> None:
     assert history["outcome"] == "superseded"
 
 
+def test_create_retry_exhaustion_dead_letters_and_stops_selection(tmp_path) -> None:
+    store = Store(tmp_path / "operations.db")
+    run_id = store.create_run("phone", "tool", "Followthrough signal", "archive-retry-cap")
+    store.create_hermes_job(
+        job_id="job-retry-cap",
+        run_id=run_id,
+        archive_id="archive-retry-cap",
+        event_id="event-retry-cap",
+        idempotency_key="followthrough:archive-retry-cap:research:v3",
+        capsule_path=str(tmp_path / "job.json"),
+        category="tool",
+        entity="bounded tool",
+    )
+    for _ in range(5):
+        assert len(store.kanban_pending_create(limit=1)) == 1
+        store.kanban_record_create_failure(run_id, error="temporary_failure")
+
+    job = store.hermes_job("job-retry-cap")
+    assert job["state"] == "dead_letter"
+    assert job["attempts"] == 5
+    assert store.kanban_pending_create(limit=1) == []
+    assert store.get_run(run_id)["status"] == "failed"
+
+
+def test_mid_create_park_is_not_overwritten_by_created_receipt(tmp_path) -> None:
+    from followthrough.controls import ControlPlane
+
+    store = Store(tmp_path / "operations.db")
+    controls = ControlPlane(store)
+    run_id = store.create_run("phone", "repository", "Followthrough signal", "archive-race")
+    store.create_hermes_job(
+        job_id="job-race",
+        run_id=run_id,
+        archive_id="archive-race",
+        event_id="event-race",
+        idempotency_key="followthrough:archive-race:research:v3",
+        capsule_path=str(tmp_path / "job.json"),
+        category="repository",
+        entity="owner/repo",
+    )
+    assert store.kanban_pending_create(limit=1)
+    controls.park_run(run_id, actor="owner", reason_code="emergency_stop")
+
+    accepted = store.kanban_record_created(
+        run_id,
+        task_id="task-created-during-stop",
+        idempotency_key="followthrough:archive-race:research:v3",
+        capsule_path=str(tmp_path / "capsule.json"),
+        hermes_status="ready",
+    )
+
+    assert accepted is False
+    job = store.hermes_job("job-race")
+    assert job["state"] == "parked"
+    assert job["task_id"] == "task-created-during-stop"
+
+
+def test_notification_failures_are_bounded(tmp_path) -> None:
+    store = Store(tmp_path / "operations.db")
+    run_id = store.create_run("phone", "tool", "Followthrough signal", "archive-notify-cap")
+    store.create_hermes_job(
+        job_id="job-notify-cap",
+        run_id=run_id,
+        archive_id="archive-notify-cap",
+        event_id="event-notify-cap",
+        idempotency_key="followthrough:archive-notify-cap:research:v3",
+        capsule_path=str(tmp_path / "job.json"),
+        category="tool",
+        entity="bounded tool",
+        discord_chat_id="123",
+        discord_user_id="123",
+    )
+    store.mark_hermes_enqueued("job-notify-cap", "task-notify-cap")
+    for _ in range(5):
+        assert len(store.kanban_pending_notifications(limit=1)) == 1
+        store.kanban_record_notification_failure(run_id, error="discord_unavailable")
+
+    job = store.hermes_job("job-notify-cap")
+    assert job["notification_attempts"] == 5
+    assert job["notification_state"] == "failed"
+    assert store.kanban_pending_notifications(limit=1) == []
+
+
 def test_false_positive_can_cancel_only_a_nonrunning_job(tmp_path) -> None:
     store = Store(tmp_path / "operations.db")
     run_id = store.create_run("omi", "todo", "Followthrough signal", "archive-false")

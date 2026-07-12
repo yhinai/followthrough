@@ -35,15 +35,15 @@ class TokenAuthority:
         return [token for path in sorted(self.device_tokens_dir.glob("*.token")) if (token := self._read(path))]
 
     def dashboard(self, candidate: str) -> bool:
-        expected = self._read(self.dashboard_token_file)
-        if not self.required and not expected:
+        if not self.required:
             return True
+        expected = self._read(self.dashboard_token_file)
         return bool(expected and candidate and hmac.compare_digest(candidate, expected))
 
     def device(self, candidate: str) -> bool:
-        tokens = self._device_tokens()
-        if not self.required and not tokens:
+        if not self.required:
             return True
+        tokens = self._device_tokens()
         return bool(candidate and any(hmac.compare_digest(candidate, expected) for expected in tokens))
 
     def dashboard_or_device(self, candidate: str) -> bool:

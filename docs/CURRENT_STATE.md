@@ -21,7 +21,7 @@ Memo is the primary sensor. Omi, the Termux audio uploader, and the ADB transcri
 ## Verified runtime
 
 - Public health endpoint and Followthrough, orchestrator, Cloudflare tunnel, and soak services are active.
-- Followthrough Python suite: 173 passed after the Fable audit and structural hardening.
+- Followthrough Python suite: 180 passed after orchestration durability and scanner hardening.
 - Memo Android build: successful on OpenJDK 17.
 - Samsung `SM-F776U1`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified.
 - OnePlus `CPH2513`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified while connected as ADB serial `31e0272e`.

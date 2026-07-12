@@ -28,6 +28,7 @@ def configured_settings(tmp_path: Path) -> tuple[Settings, str, str]:
         device_tokens_dir=devices,
         archive_key_file=secrets_dir / "archive.key",
         require_auth=True,
+        encrypt_archive=True,
         public_url="https://example.test",
         kanban_enabled=False,
     )

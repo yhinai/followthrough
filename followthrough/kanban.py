@@ -290,6 +290,7 @@ class HermesKanbanClient:
         archive_id: str,
         capsule_path: str | Path,
         runner_evidence: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> CardReceipt:
         safe_run_id = _opaque_id(run_id, name="run_id")
         safe_archive_id = _opaque_id(archive_id, name="archive_id")
@@ -305,7 +306,10 @@ class HermesKanbanClient:
         capsule = TaskCapsule.from_mapping(loaded)
 
         short_id = hashlib.sha256(safe_run_id.encode("utf-8")).hexdigest()[:10]
-        idempotency_key = f"followthrough:{safe_archive_id}:research:v3"
+        idempotency_key = _opaque_id(
+            idempotency_key or f"followthrough:{safe_archive_id}:research:v3",
+            name="idempotency_key",
+        )
         acceptance = json.dumps(list(capsule.acceptance), ensure_ascii=True, separators=(",", ":"))
         bounded_evidence = "pending"
         if runner_evidence is not None:
@@ -621,7 +625,7 @@ class KanbanStore(Protocol):
         idempotency_key: str,
         capsule_path: str,
         hermes_status: str,
-    ) -> None: ...
+    ) -> bool: ...
 
     def kanban_record_create_failure(self, run_id: str, *, error: str) -> None: ...
 
@@ -793,14 +797,24 @@ class DurableOrchestrator:
                     archive_id=capsule.archive_id,
                     capsule_path=path,
                     runner_evidence=runner_evidence,
+                    idempotency_key=_opaque_id(
+                        row.get("idempotency_key"), name="idempotency_key"
+                    ),
                 )
-                self.store.kanban_record_created(
+                accepted = self.store.kanban_record_created(
                     capsule.run_id,
                     task_id=receipt.task_id,
                     idempotency_key=receipt.idempotency_key,
                     capsule_path=str(path),
                     hermes_status=receipt.status,
                 )
+                if accepted is False:
+                    # An emergency control or cancellation won the race while
+                    # Hermes was creating the card. Never revive the local job;
+                    # immediately park the newly observable external card.
+                    self.client.park_task(
+                        receipt.task_id, reason_code="state_changed_during_create"
+                    )
                 result["created"] = int(result["created"]) + 1
             except Exception as error:  # retry ownership belongs to the durable store
                 code = self._error_code(error)
@@ -870,6 +884,14 @@ class DurableOrchestrator:
                 latest_outcome = _latest_outcome(runs)
                 summary = _latest_summary(runs)
                 state = map_task_status(task, runs, diagnostics)
+                if state == "completed" and self.effect_service is not None:
+                    # Submit before making the job terminal. If the typed
+                    # effector transiently fails, the job remains active and
+                    # the next reconciliation retries with the same idempotency
+                    # key. A crash after submit is also safe because EffectService
+                    # owns idempotent replay.
+                    if self._dispatch_effect(row, task_id, runs):
+                        result["effects"] = int(result["effects"]) + 1
                 self.store.kanban_record_reconciled(
                     run_id,
                     task_id=task_id,
@@ -880,18 +902,6 @@ class DurableOrchestrator:
                     diagnostics=_diagnostic_codes(diagnostics),
                 )
                 result["reconciled"] = int(result["reconciled"]) + 1
-                if state == "completed" and self.effect_service is not None:
-                    try:
-                        if self._dispatch_effect(row, task_id, runs):
-                            result["effects"] = int(result["effects"]) + 1
-                    except Exception as effect_error:
-                        errors.append(
-                            {
-                                "phase": "effect",
-                                "run_id": run_reference,
-                                "error": self._error_code(effect_error),
-                            }
-                        )
             except Exception as error:
                 code = self._error_code(error)
                 try:

@@ -122,6 +122,7 @@ class Store:
         self._ensure_column("hermes_jobs", "hermes_status", "TEXT")
         self._ensure_column("hermes_jobs", "latest_outcome", "TEXT")
         self._ensure_column("hermes_jobs", "diagnostics_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("hermes_jobs", "notification_attempts", "INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
 
     def _ensure_column(self, table: str, column: str, declaration: str) -> None:
@@ -477,7 +478,7 @@ class Store:
 
     def kanban_pending_create(self, *, limit: int) -> list[dict[str, Any]]:
         with self.lock:
-            rows = self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NULL AND state IN ('pending','retry','dispatching') ORDER BY created_at LIMIT ?", (limit,)).fetchall()
+            rows = self.db.execute("SELECT * FROM hermes_jobs WHERE task_id IS NULL AND state IN ('pending','retry','dispatching') AND attempts<5 ORDER BY created_at LIMIT ?", (limit,)).fetchall()
             identifiers = [row["id"] for row in rows]
             if identifiers:
                 placeholders = ",".join("?" for _ in identifiers)
@@ -491,26 +492,56 @@ class Store:
                 "entity": row["entity"],
                 "intent": row["intent"],
                 "acceptance": json.loads(row["acceptance_json"]),
+                "idempotency_key": row["idempotency_key"],
             }
             for row in rows
         ]
 
-    def kanban_record_created(self, run_id: str, *, task_id: str, idempotency_key: str, capsule_path: str, hermes_status: str) -> None:
+    def kanban_record_created(self, run_id: str, *, task_id: str, idempotency_key: str, capsule_path: str, hermes_status: str) -> bool:
         timestamp = now()
         with self.lock:
+            job = self.db.execute("SELECT * FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
+            if not job:
+                return False
+            if job["task_id"] not in (None, task_id):
+                return False
+            accepted = job["state"] == "dispatching"
+            next_state = "enqueued" if accepted else job["state"]
             self.db.execute(
-                "UPDATE hermes_jobs SET task_id=?,idempotency_key=?,capsule_path=?,state='enqueued',hermes_status=?,last_error=NULL,last_sync_at=?,updated_at=? WHERE run_id=?",
-                (task_id, idempotency_key, capsule_path, hermes_status, timestamp, timestamp, run_id),
+                "UPDATE hermes_jobs SET task_id=?,idempotency_key=?,capsule_path=?,state=?,hermes_status=?,last_error=NULL,last_sync_at=?,updated_at=? WHERE run_id=?",
+                (task_id, idempotency_key, capsule_path, next_state, hermes_status, timestamp, timestamp, run_id),
             )
-            self.db.execute("UPDATE runs SET status='queued' WHERE id=?", (run_id,))
+            if accepted:
+                self.db.execute("UPDATE runs SET status='queued' WHERE id=?", (run_id,))
             self.db.commit()
+        return accepted
 
     def kanban_record_create_failure(self, run_id: str, *, error: str) -> None:
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET state='retry',last_error=?,updated_at=? WHERE run_id=?", (error[:500], now(), run_id))
+            job = self.db.execute("SELECT attempts,state FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
+            if not job or job["state"] != "dispatching":
+                return
+            terminal = int(job["attempts"]) >= 5
+            state = "dead_letter" if terminal else "retry"
+            timestamp = now()
+            self.db.execute("UPDATE hermes_jobs SET state=?,last_error=?,updated_at=? WHERE run_id=?", (state, error[:500], timestamp, run_id))
+            if terminal:
+                self.db.execute("UPDATE runs SET status='failed',success=0,finished_at=? WHERE id=?", (timestamp, run_id))
             self.db.commit()
 
     def kanban_pending_notifications(self, *, limit: int) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND discord_chat_id IS NOT NULL AND notification_state NOT IN ('subscribed','failed') AND notification_attempts<5 AND state NOT IN ('completed','cancelled') ORDER BY updated_at LIMIT ?",
+                (limit,),
+            ).fetchall()
+            if rows:
+                placeholders = ",".join("?" for _ in rows)
+                self.db.execute(
+                    f"UPDATE hermes_jobs SET notification_attempts=notification_attempts+1,updated_at=? WHERE id IN ({placeholders})",
+                    (now(), *(row["id"] for row in rows)),
+                )
+                self.db.commit()
         return [
             {
                 "run_id": row["run_id"],
@@ -518,10 +549,7 @@ class Store:
                 "discord_chat_id": row["discord_chat_id"],
                 "discord_user_id": row["discord_user_id"],
             }
-            for row in self.db.execute(
-                "SELECT * FROM hermes_jobs WHERE task_id IS NOT NULL AND discord_chat_id IS NOT NULL AND notification_state != 'subscribed' AND state NOT IN ('completed','cancelled') ORDER BY updated_at LIMIT ?",
-                (limit,),
-            ).fetchall()
+            for row in rows
         ]
 
     def kanban_record_notified(self, run_id: str, *, subscription: dict[str, str]) -> None:
@@ -531,7 +559,9 @@ class Store:
 
     def kanban_record_notification_failure(self, run_id: str, *, error: str) -> None:
         with self.lock:
-            self.db.execute("UPDATE hermes_jobs SET notification_state='retry',last_error=?,updated_at=? WHERE run_id=?", (error[:500], now(), run_id))
+            job = self.db.execute("SELECT notification_attempts FROM hermes_jobs WHERE run_id=?", (run_id,)).fetchone()
+            state = "failed" if job and int(job["notification_attempts"]) >= 5 else "retry"
+            self.db.execute("UPDATE hermes_jobs SET notification_state=?,last_error=?,updated_at=? WHERE run_id=?", (state, error[:500], now(), run_id))
             self.db.commit()
 
     def kanban_active(self, *, limit: int) -> list[dict[str, Any]]:
