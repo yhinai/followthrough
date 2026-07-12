@@ -82,10 +82,17 @@ function memoryCard(item) {
   return `<div class="memory-item"><span>${escapeHtml(String(item.category || "M").slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(item.entity)}</strong><small>${escapeHtml(label(item.category))} · ${escapeHtml(timeAgo(item.created_at))}</small></div></div>`;
 }
 
-function renderCurrentJob(jobs) {
+function renderCurrentJob(jobs, activity) {
   const active = jobs.filter((job) => !["completed", "cancelled", "dead_letter", "failed"].includes(job.state));
   const job = active[0] || jobs[0];
   $("#activeCount").textContent = `${active.length} active`;
+  const latestSignal = activity[0];
+  const signalIsNewer = latestSignal && (!job || new Date(latestSignal.received_at) > new Date(job.updated_at));
+  if (!active.length && signalIsNewer && !latestSignal.relevant) {
+    $("#currentJob").className = "current-job observed";
+    $("#currentJob").innerHTML = `<div class="focus-icon quiet">✓</div><span class="focus-state">Latest decision · ${escapeHtml(timeAgo(latestSignal.received_at))}</span><strong>No action required</strong><p>${escapeHtml(label(latestSignal.classification))} · safely archived</p><div class="progress-track"><i></i></div><small>Hermes was not invoked because the relevance gate found no actionable intent.</small>`;
+    return;
+  }
   if (!job) return;
   $("#currentJob").className = `current-job ${escapeHtml(job.state)}`;
   $("#currentJob").innerHTML = `<div class="focus-icon">H</div><span class="focus-state">${active.length ? "Hermes is working" : "Latest completed work"}</span><strong>${escapeHtml(job.entity || "Identified signal")}</strong><p>${escapeHtml(label(job.hermes_status || job.state))}</p><div class="progress-track"><i></i></div><small>${job.task_id ? `Receipt ${escapeHtml(job.task_id)}` : "Creating durable receipt…"}</small>`;
@@ -102,31 +109,22 @@ async function load() {
     $("#systemState").classList.toggle("healthy", healthy);
     $("#lastSync").textContent = `Updated ${new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
     $("#modeLabel").textContent = mode.toUpperCase();
-    $("#controlTitle").textContent = mode === "running" ? "Autonomy is running" : mode === "paused" ? "Actions are paused" : "Emergency stop active";
-    $("#controlDetail").textContent = `Generation ${controls.global.generation} · Audit chain ${controls.audit_chain_valid ? "valid" : "failed"} · ${Object.values(controls.capabilities).filter((value) => value.enabled).length} capabilities enabled`;
     document.body.dataset.mode = mode;
     $("#mArchive").textContent = metrics.total ?? 0;
-    $("#mAudio").textContent = metrics.audio_chunks ?? 0;
     $("#mJobs").textContent = jobs.length;
     $("#mDone").textContent = metrics.completed ?? 0;
-    $("#mLatency").textContent = metrics.avg_latency_ms ? `${(metrics.avg_latency_ms / 1000).toFixed(1)}s` : "—";
     $("#activity").innerHTML = activity.length ? activity.slice(0,9).map(activityCard).join("") : '<div class="empty-state"><span>◌</span>Waiting for the phone…</div>';
     if (activity.length) lastActivityId = activity[0].event_id;
     $("#jobs").innerHTML = jobs.length ? jobs.slice(0,12).map(jobRow).join("") : '<div class="empty-state">Waiting for the first relevant signal…</div>';
-    $("#jobSummary").textContent = `${jobs.filter((job) => job.state === "completed").length} completed · ${jobs.filter((job) => !["completed","cancelled","dead_letter","failed"].includes(job.state)).length} active`;
-    renderCurrentJob(jobs);
-    $("#memoryCount").textContent = `${memories.length} items`;
+    $("#jobSummary").textContent = `Live · ${jobs.filter((job) => job.state === "completed").length} completed · ${jobs.filter((job) => !["completed","cancelled","dead_letter","failed"].includes(job.state)).length} active`;
+    renderCurrentJob(jobs, activity);
+    $("#memoryCount").textContent = `Live · ${memories.length} items`;
     $("#memories").innerHTML = memories.length ? memories.slice(0,7).map(memoryCard).join("") : '<div class="empty-state">Nothing promoted yet.</div>';
-    const integrations = {...(metrics.integrations || {}), encrypted_archive:true, durable_kanban:Boolean(metrics.orchestrator), audit_chain:controls.audit_chain_valid};
-    $("#integrations").innerHTML = Object.entries(integrations).map(([name, enabled]) => `<span class="integration ${enabled ? "on" : ""}">${enabled ? "✓" : "○"} ${escapeHtml(label(name))}</span>`).join("");
   } catch (error) {
     $("#systemState").textContent = `Owner authentication required · ${error.message}`;
   }
 }
 
-$("#pauseActions").onclick = () => setMode("paused");
-$("#resumeActions").onclick = () => setMode("running", true);
-$("#killAll").onclick = () => setMode("killed");
 $("#sample").onclick = () => { $("#input").value = "Research and safely evaluate https://github.com/pypa/sampleproject"; };
 $("#submit").onclick = () => sendSignal($("#input").value);
 $("#listen").onclick = () => setBrowserMic(!browserListening);

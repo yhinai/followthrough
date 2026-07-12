@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#080b0d">
   <title>Followthrough · Live Ambient Operator</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260711-2">
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260711-2">
+  <link rel="stylesheet" href="/static/styles.css?v=20260711-4">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260711-4">
 </head>
 <body>
   <div class="aurora a1"></div><div class="aurora a2"></div>
@@ -35,10 +35,8 @@
 
     <section class="metric-strip panel-wide glass">
       <div><small>Transcript events</small><b id="mArchive">0</b><span>encrypted</span></div>
-      <div><small>Audio chunks</small><b id="mAudio">0</b><span>preserved</span></div>
       <div><small>Hermes jobs</small><b id="mJobs">0</b><span>total</span></div>
       <div><small>Completed work</small><b id="mDone">0</b><span>verified</span></div>
-      <div><small>Average latency</small><b id="mLatency">—</b><span>end to end</span></div>
     </section>
 
     <section class="command-grid">
@@ -74,12 +72,6 @@
         <div class="section-head"><div><p class="eyebrow">Curated context</p><h2>Operational memory</h2></div><span id="memoryCount">0 items</span></div>
         <div id="memories" class="memory-list"><div class="empty-state">Nothing promoted yet.</div></div>
       </article>
-      <article class="glass control-panel">
-        <div class="section-head"><div><p class="eyebrow">Autonomy supervisor</p><h2 id="controlTitle">Loading control plane…</h2></div></div>
-        <p id="controlDetail" class="panel-note"></p>
-        <div id="integrations" class="integrations"></div>
-        <div class="controls"><button id="pauseActions" class="secondary">Pause actions</button><button id="resumeActions" class="primary">Resume</button><button id="killAll" class="danger">Emergency stop</button></div>
-      </article>
     </section>
 
     <details class="glass demo-drawer">
@@ -89,6 +81,6 @@
   </main>
 
   <footer><span>Followthrough · Hermes Buildathon SF</span><span>Cloudflare edge · NVIDIA Spark · Discord receipts</span></footer>
-  <script src="/static/app.js?v=20260711-2"></script>
+  <script src="/static/app.js?v=20260711-4"></script>
 </body>
 </html>
