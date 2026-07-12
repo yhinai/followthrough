@@ -169,3 +169,31 @@ def test_desktop_screenshot_is_served_for_the_dashboard_panel(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/")
     assert response.content == image
+
+
+
+def test_operator_input_can_skip_verification(configured_settings, monkeypatch) -> None:
+    """Human input is watched by a human, so the dashboard skips the before and
+    after screenshots that would otherwise triple every click's latency."""
+    settings, _, _ = configured_settings
+    shots: list[bool] = []
+
+    async def fake_screenshot(self, computer_id=None):
+        shots.append(True)
+        return png("green"), {
+            "provider": "spark-local", "computer_id": None,
+            "width": 1280, "height": 720, "fingerprint": "abc",
+        }
+
+    async def fake_request(self, target, method, action, body=None):
+        return {"ok": True}
+
+    monkeypatch.setattr(DesktopRouter, "screenshot", fake_screenshot)
+    monkeypatch.setattr(DesktopRouter, "_request", fake_request)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.post("/api/desktop/click", json={"x": 10, "y": 10, "verify": False})
+
+    assert response.status_code == 200
+    assert response.json()["visual_changed"] is None
+    assert shots == []

@@ -121,6 +121,105 @@ function renderCurrentJob(jobs, activity) {
   setHTML("#currentJob", `<div class="focus-symbol">H</div><span class="focus-state">${active.length ? "Hermes is working" : "Latest completed work"}</span><strong>${escapeHtml(job.entity || "Identified signal")}</strong><p>${escapeHtml(label(job.hermes_status || job.state))}</p><div class="progress-track"><i></i></div><small>${job.task_id ? `Receipt ${escapeHtml(job.task_id)}` : "Creating durable receipt…"}</small>`);
 }
 
+
+// ---- Interactive desktop control -------------------------------------------
+// The panel paints the frame stream; these handlers send the operator's mouse
+// and keyboard back to the same typed API the agent uses. Verification is off
+// for human input: a person can see the result, and the round trip stays fast.
+let desktopControl = false;
+let desktopBusy = false;
+
+const DESKTOP_KEYS = {
+  Enter: "Return", Backspace: "BackSpace", Tab: "Tab", Escape: "Escape",
+  ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+  Delete: "Delete", Home: "Home", End: "End", PageUp: "Prior", PageDown: "Next",
+  " ": "space",
+};
+
+function desktopPoint(event) {
+  const image = $("#desktopFrame");
+  const box = image.getBoundingClientRect();
+  // The frame is letterboxed by object-fit: contain, so map through the
+  // rendered image rather than the element box or every click lands skewed.
+  const scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight);
+  const shownWidth = image.naturalWidth * scale;
+  const shownHeight = image.naturalHeight * scale;
+  const offsetX = (box.width - shownWidth) / 2;
+  const offsetY = (box.height - shownHeight) / 2;
+  const x = Math.round((event.clientX - box.left - offsetX) / scale);
+  const y = Math.round((event.clientY - box.top - offsetY) / scale);
+  if (x < 0 || y < 0 || x > image.naturalWidth || y > image.naturalHeight) return null;
+  return {x, y};
+}
+
+async function desktopSend(action, body) {
+  if (desktopBusy) return;
+  desktopBusy = true;
+  try {
+    await jsonApi(`/api/desktop/${action}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...body, verify: false}),
+    });
+    $("#desktopFrame").src = `/api/desktop/screenshot?t=${Date.now()}`;
+  } catch (error) {
+    showToast(`Desktop ${action} failed: ${error.message}`, "error");
+  } finally {
+    desktopBusy = false;
+  }
+}
+
+function setDesktopControl(on) {
+  desktopControl = on;
+  const button = $("#desktopControl");
+  const screen = document.querySelector(".desktop-screen");
+  if (button) {
+    button.setAttribute("aria-pressed", String(on));
+    button.textContent = on ? "Stop controlling" : "Take control";
+  }
+  if (screen) screen.classList.toggle("controllable", on);
+  if (on) $("#desktopFrame").focus();
+}
+
+function wireDesktopControl() {
+  const image = $("#desktopFrame");
+  if (!image) return;
+  image.tabIndex = 0;
+
+  image.addEventListener("click", (event) => {
+    if (!desktopControl) return;
+    const point = desktopPoint(event);
+    if (point) desktopSend("click", {...point, button: "left", double: event.detail > 1});
+  });
+  image.addEventListener("contextmenu", (event) => {
+    if (!desktopControl) return;
+    event.preventDefault();
+    const point = desktopPoint(event);
+    if (point) desktopSend("click", {...point, button: "right"});
+  });
+  image.addEventListener("wheel", (event) => {
+    if (!desktopControl) return;
+    event.preventDefault();
+    desktopSend("scroll", {direction: event.deltaY > 0 ? "down" : "up", amount: 3});
+  }, {passive: false});
+  image.addEventListener("keydown", (event) => {
+    if (!desktopControl) return;
+    event.preventDefault();
+    const mapped = DESKTOP_KEYS[event.key];
+    if (mapped) return void desktopSend("key", {key: mapped});
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      const chord = [event.ctrlKey && "ctrl", event.altKey && "alt", event.key.length === 1 && event.key]
+        .filter(Boolean).join("+");
+      if (chord.includes("+")) desktopSend("key", {key: chord});
+      return;
+    }
+    if (event.key.length === 1) desktopSend("type", {text: event.key, delay_ms: 0});
+  });
+
+  const button = $("#desktopControl");
+  if (button) button.onclick = () => setDesktopControl(!desktopControl);
+}
+
 function renderDesktop(doctor, actions) {
   const state = $("#desktopState");
   const frame = $("#desktopFrame");
@@ -337,6 +436,7 @@ document.addEventListener("keydown", (event) => {
     $("#input").blur();
   }
 });
+wireDesktopControl();
 load();
 setInterval(load, 1500);
 const liveEvents = new EventSource("/api/events");
