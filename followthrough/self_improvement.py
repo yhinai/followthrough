@@ -62,8 +62,14 @@ def _relative_target(value: str) -> Path:
     if target.is_absolute() or not target.parts or ".." in target.parts:
         raise ValueError("target must be a relative path")
     normalized = Path(*(_safe(part, 80) for part in target.parts))
-    if any(part.lower() in PROTECTED_TARGET_PARTS for part in normalized.parts):
-        raise ValueError("candidate may not target an evaluator, gate, verifier, or control")
+    for part in normalized.parts:
+        # Guard against both bare directory names ("controls") and real file
+        # names ("controls.py", "controls.py.bak"): any dot-delimited token of a
+        # path component must not name a protected module, otherwise
+        # ``followthrough/controls.py`` would slip through the parts check.
+        tokens = {part.lower(), *part.lower().split(".")}
+        if tokens & PROTECTED_TARGET_PARTS:
+            raise ValueError("candidate may not target an evaluator, gate, verifier, or control")
     return normalized
 
 

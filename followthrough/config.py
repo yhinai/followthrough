@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     require_auth: bool = True
     max_transcript_bytes: int = 65_536
     max_audio_chunk_bytes: int = 8_388_608
+    # Upper bound on a single event's audio chunk index. Bounds the manifest's
+    # dense-range continuity scan so a sparse sequence cannot force a huge
+    # allocation.
+    max_audio_sequence: int = 100_000
     webhook_token: str = ""  # legacy only; file-backed device tokens are preferred
     discord_target: str = "discord:1510104161612730378"
     auto_send: bool = True

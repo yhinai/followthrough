@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from .adb_bridge import Transcript, TranscriptAggregator
 from .archive import ArchiveIntegrityError, ArchiveVault
@@ -130,7 +131,12 @@ def _omi_event(payload: dict[str, Any], device_header: str | None = None) -> Tra
         for key in ("session_id", "language", "speaker", "speaker_id", "is_user", "app_id")
         if key in payload
     }
-    return TranscriptEventIn(event_id=str(event_id), device_id=device_id, text=text, source="omi", occurred_at=occurred, consent=True, metadata=metadata)
+    try:
+        return TranscriptEventIn(event_id=str(event_id), device_id=device_id, text=text, source="omi", occurred_at=occurred, consent=True, metadata=metadata)
+    except ValidationError as exc:
+        # A malformed client-supplied timestamp is a bad request, not a server
+        # fault; surface it as 422 instead of an unhandled 500.
+        raise HTTPException(status_code=422, detail="invalid Omi transcript field") from exc
 
 
 def _omi_segment_events(payload: Any, uid: str, idempotency_key: str | None, hook: str) -> list[tuple[TranscriptEventIn, bool | None]]:
@@ -516,17 +522,39 @@ def create_app(config: Settings = settings) -> FastAPI:
             }
         return result
 
+    def _authorize_event_principal(archived: dict[str, object], candidate: str) -> None:
+        """Bind an audio operation to the archive event's capture principal.
+
+        A dashboard token may inspect any event. A device token may only reach
+        an event whose server-derived ``capture_principal`` matches its own
+        one-way identity; a mismatch is reported as 404 so ownership of the
+        opaque event id is never disclosed to another valid device.
+        """
+
+        if authority.dashboard(candidate):
+            return
+        principal = hashlib.sha256(candidate.encode()).hexdigest()
+        try:
+            metadata = json.loads(archived["metadata_json"])
+        except (TypeError, json.JSONDecodeError):
+            metadata = {}
+        bound = metadata.get("capture_principal")
+        if bound != principal:
+            raise HTTPException(status_code=404, detail="archive event not found")
+
     @application.get("/api/v1/audio/{event_id}/status")
     async def audio_status(
         event_id: str,
         authorization: str | None = Header(default=None),
         x_followthrough_token: str | None = Header(default=None),
     ) -> dict[str, object]:
-        if not authority.dashboard_or_device(token(authorization, x_followthrough_token)):
+        candidate = token(authorization, x_followthrough_token)
+        if not authority.dashboard_or_device(candidate):
             raise HTTPException(status_code=401, detail="authentication required")
         archived = archive_store.by_event(event_id)
         if not archived:
             raise HTTPException(status_code=404, detail="archive event not found")
+        _authorize_event_principal(archived, candidate)
         return {"event_id": event_id, **archive_store.audio_manifest(archived["id"])}
 
     @application.put("/api/v1/audio/{event_id}/{sequence}")
@@ -543,10 +571,13 @@ def create_app(config: Settings = settings) -> FastAPI:
         require_device(authorization, x_followthrough_token)
         if sequence < 0:
             raise HTTPException(status_code=422, detail="sequence must be non-negative")
+        if sequence > config.max_audio_sequence:
+            raise HTTPException(status_code=422, detail="sequence exceeds configured maximum")
         authorize_capture(f"audio:{event_id}:{sequence}", "capture:native-audio")
         archived = archive_store.by_event(event_id)
         if not archived:
             raise HTTPException(status_code=404, detail="transcript event must be ingested before audio")
+        _authorize_event_principal(archived, token(authorization, x_followthrough_token))
         if x_device_id and x_device_id != archived["device_id"]:
             raise HTTPException(status_code=403, detail="device does not own this event")
         content_length = request.headers.get("content-length")

@@ -87,8 +87,16 @@ def parse_whisper_line(line: str, *, day: datetime | None = None) -> Transcript 
     if not text:
         return None
     basis = day or datetime.now().astimezone()
-    clock = datetime.strptime(match.group("clock"), "%H:%M:%S.%f").time()
-    occurred = datetime.combine(basis.date(), clock, tzinfo=UTC)
+    clock_text = match.group("clock")
+    # The WHISPER pattern makes fractional seconds optional, so the format must
+    # match either shape or strptime raises ValueError and tears down ingestion.
+    clock_format = "%H:%M:%S.%f" if "." in clock_text else "%H:%M:%S"
+    clock = datetime.strptime(clock_text, clock_format).time()
+    # The logcat clock is device-local wall time. Stamp it with the basis
+    # timezone and convert to UTC rather than relabeling local time as UTC,
+    # which previously skewed every archived timestamp by the UTC offset.
+    tz = basis.tzinfo or datetime.now().astimezone().tzinfo
+    occurred = datetime.combine(basis.date(), clock, tzinfo=tz).astimezone(UTC)
     digest = hashlib.sha256(f"{occurred.isoformat()}\0{text}".encode()).hexdigest()
     return Transcript(
         event_id=f"adb-omi:{digest}",

@@ -16,9 +16,56 @@ from followthrough.soak import (
     SoakConfig,
     SoakSampler,
     canonical_json,
+    inspect_archive_audio,
     run_soak,
     validate_schedule,
 )
+
+
+def _capture_archive(path: Path, *, sequences: list[int], next_sequence: int) -> sqlite3.Connection:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    database = sqlite3.connect(path)
+    database.row_factory = sqlite3.Row
+    database.executescript(
+        """
+        CREATE TABLE archive_events(
+          id TEXT, event_id TEXT, relevant INTEGER, classification TEXT,
+          metadata_json TEXT, run_id TEXT
+        );
+        CREATE TABLE audio_chunks(archive_id TEXT, sequence INTEGER, path TEXT);
+        CREATE TABLE capture_streams(id TEXT, next_sequence INTEGER);
+        """
+    )
+    for index, sequence in enumerate(sequences):
+        database.execute(
+            "INSERT INTO archive_events VALUES(?,?,?,?,?,?)",
+            (
+                f"archive-{index}",
+                f"event-{index}",
+                0,
+                "audio_only",
+                canonical_json({"capture_stream_id": "stream-1", "stream_sequence": sequence}),
+                None,
+            ),
+        )
+    database.execute("INSERT INTO capture_streams VALUES(?,?)", ("stream-1", next_sequence))
+    database.commit()
+    return database
+
+
+def test_capture_gap_ignores_inflight_allocation_ahead_of_events(tmp_path: Path) -> None:
+    # next_sequence is two allocations ahead of the committed events, which is
+    # the legitimate window between the two-phase ingest commits and must not be
+    # reported as a continuity gap.
+    archive = _capture_archive(tmp_path / "a.db", sequences=[0, 1], next_sequence=3)
+    result = inspect_archive_audio(archive, None)
+    assert result["capture_sequence_gap_streams"] == 0
+
+
+def test_capture_gap_still_detects_interior_hole(tmp_path: Path) -> None:
+    archive = _capture_archive(tmp_path / "b.db", sequences=[0, 2], next_sequence=3)
+    result = inspect_archive_audio(archive, None)
+    assert result["capture_sequence_gap_streams"] == 1
 
 
 def create_operations(path: Path, *, duplicate_jobs: bool = False, tamper: bool = False) -> None:

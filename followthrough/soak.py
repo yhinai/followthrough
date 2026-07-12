@@ -509,26 +509,22 @@ def inspect_archive_audio(
         stream_sequence = metadata.get("stream_sequence")
         if stream_id is not None and isinstance(stream_sequence, int):
             capture_sequences[str(stream_id)].append(stream_sequence)
-    capture_next: dict[str, int] = {}
-    if "capture_streams" in tables and {
-        "id",
-        "next_sequence",
-    }.issubset(_columns(archive, "capture_streams")):
-        capture_next = {
-            str(row["id"]): int(row["next_sequence"])
-            for row in archive.execute("SELECT id,next_sequence FROM capture_streams")
-        }
+    # Only interior holes (a missing sequence below one that is present) are a
+    # genuine continuity loss. The newest allocated sequence in
+    # ``capture_streams.next_sequence`` is deliberately NOT used as an upper
+    # bound: the ingest path commits the sequence allocation and the event row
+    # in two separate transactions, so a read taken between them legitimately
+    # sees ``next_sequence`` ahead of the events with no loss. Bounding gaps by
+    # the highest present sequence — as the audio-chunk check above already does
+    # — removes that read-time race without hiding real interior loss, which any
+    # later chunk in the append-only stream re-exposes.
     capture_gaps: dict[str, list[int]] = {}
-    for stream_id in set(capture_sequences) | set(capture_next):
-        sequences = capture_sequences.get(stream_id, [])
+    for stream_id, sequences in capture_sequences.items():
         present = set(sequences)
-        expected_next = capture_next.get(
-            stream_id, max(present) + 1 if present else 0
-        )
-        upper = max(expected_next, max(present) + 1 if present else 0)
-        missing = [value for value in range(upper) if value not in present]
-        if missing:
-            capture_gaps[stream_id] = missing
+        if present:
+            missing = [value for value in range(0, max(present) + 1) if value not in present]
+            if missing:
+                capture_gaps[stream_id] = missing
 
     audio_only_without = [
         row["id"]

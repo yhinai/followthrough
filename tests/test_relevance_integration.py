@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +13,14 @@ from followthrough.store import Store, now
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _database_bytes(path: Path) -> bytes:
+    data = b""
+    for candidate in (path, path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+        if candidate.is_file():
+            data += candidate.read_bytes()
+    return data
 
 
 def _wait_completed(app, run_id: str) -> None:
@@ -48,8 +57,11 @@ def test_archive_is_physically_separate_and_operational_memory_is_relevance_gate
 
     assert app.state.archive_store.by_event("event-separated-0001") is not None
     assert app.state.store.db.execute("SELECT COUNT(*) FROM archive_events").fetchone()[0] == 0
-    assert raw.encode() not in settings.db_path.read_bytes()
-    assert raw.encode() not in settings.archive_db_path.read_bytes()
+    # Both stores run in WAL mode with open connections, so recent writes live in
+    # the -wal/-shm sidecars; scan them too or a plaintext regression would hide
+    # from a main-file-only assertion.
+    assert raw.encode() not in _database_bytes(settings.db_path)
+    assert raw.encode() not in _database_bytes(settings.archive_db_path)
 
 
 def test_archived_omi_non_owner_correction_restores_ambient_authorization(

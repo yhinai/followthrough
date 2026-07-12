@@ -21,7 +21,7 @@ Memo is the primary sensor. Omi, the Termux audio uploader, and the ADB transcri
 ## Verified runtime
 
 - Public health endpoint and Followthrough, orchestrator, Cloudflare tunnel, and soak services are active.
-- Followthrough Python suite: 157 passed after the two-way changes.
+- Followthrough Python suite: 169 passed (157 at the two-way release plus 12 audit regression tests).
 - Memo Android build: successful on OpenJDK 17.
 - Samsung `SM-F776U1`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified.
 - OnePlus `CPH2513`: foreground microphone, transcript/audio delivery, Gemini Live, and built-in speaker routing verified while connected as ADB serial `31e0272e`.
@@ -58,4 +58,4 @@ Memo is the primary sensor. Omi, the Termux audio uploader, and the ADB transcri
 
 ## Remaining acceptance work
 
-The product is operational but the overall goal is not marked fully accepted until the current 24-hour soak completes cleanly and a fresh physical no-repair voice run identifies its target correctly and completes phone-to-Spark-to-phone without operator correction.
+The product is operational but the overall goal is not marked fully accepted until a fresh 24-hour soak completes cleanly and a physical no-repair voice run identifies its target correctly and completes phone-to-Spark-to-phone without operator correction. The prior soak is retained as evidence but cannot pass because its pre-fix monitor recorded one transient false `capture_sequence_gap` between two ingestion commits.

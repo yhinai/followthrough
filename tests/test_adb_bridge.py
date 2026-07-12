@@ -60,3 +60,22 @@ def test_aggregate_is_content_addressed_and_buffer_clears() -> None:
     assert one is not None and two is not None
     assert one.event_id == two.event_id
     assert first.add(segment(3, "ordinary speech"), monotonic_at=3) is None
+
+
+def test_local_logcat_clock_is_converted_to_utc() -> None:
+    from datetime import timedelta, timezone
+
+    plus_five = timezone(timedelta(hours=5))
+    line = "09:00:00.000 | [OnDeviceWhisper] Transcribed 1.0s in 5ms. Text: check the repo"
+    result = parse_whisper_line(line, day=datetime(2026, 7, 11, tzinfo=plus_five))
+    assert result is not None
+    # 09:00 at +05:00 is 04:00 UTC, not a relabeled 09:00 UTC.
+    assert result.occurred_at == "2026-07-11T04:00:00+00:00"
+
+
+def test_clock_without_fractional_seconds_does_not_crash() -> None:
+    line = "09:00:00 | [OnDeviceWhisper] Transcribed 1s in 5ms. Text: schedule the meeting"
+    result = parse_whisper_line(line, day=datetime(2026, 7, 11, tzinfo=UTC))
+    assert result is not None
+    assert result.occurred_at == "2026-07-11T09:00:00+00:00"
+    assert result.text == "schedule the meeting"

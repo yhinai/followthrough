@@ -562,3 +562,20 @@ def test_orchestrator_applies_emergency_park_before_respecting_pause(tmp_path: P
     assert result["created"] == 0
     assert client.parked == [("task-emergency", "global_paused")]
     assert store.hermes_job_for_run(run_id)["state"] == "parked"
+
+
+def test_latest_summary_strips_ansi_and_control_characters() -> None:
+    from followthrough.kanban import _latest_summary, _sanitize_summary
+
+    hostile = "\x1b[31mDANGER\x1b[0m brief\x07 ready\x00\nnext line"
+    cleaned = _sanitize_summary(hostile)
+    assert "\x1b" not in cleaned
+    assert "\x07" not in cleaned
+    assert "\x00" not in cleaned
+    assert "DANGER brief ready" in cleaned
+    assert "next line" in cleaned
+
+    runs = [{"summary": "\x1b[1mResearch complete\x1b[0m"}]
+    assert _latest_summary(runs) == "Research complete"
+    # A summary that is only control noise sanitizes to nothing, not a blank.
+    assert _latest_summary([{"summary": "\x1b[0m\x00"}]) is None

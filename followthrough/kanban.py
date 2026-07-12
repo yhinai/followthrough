@@ -512,13 +512,32 @@ def _latest_outcome(runs: Sequence[Mapping[str, Any]] | None) -> str:
     return "unknown"
 
 
+def _sanitize_summary(summary: str) -> str:
+    """Strip terminal escapes and control characters from LLM-authored text.
+
+    The run summary is model output over untrusted web research and is returned
+    verbatim to the submitting device and dashboard. Removing ANSI escapes and
+    C0/C1 control characters (keeping tab/newline) prevents injected terminal
+    sequences or hidden control bytes from reaching those surfaces.
+    """
+
+    without_ansi = _ANSI_ESCAPE.sub("", summary)
+    cleaned = "".join(
+        character
+        for character in without_ansi
+        if character in "\t\n" or (0x20 <= ord(character) < 0x7F) or ord(character) >= 0xA0
+    )
+    return cleaned.strip()[:20_000]
+
+
 def _latest_summary(runs: Sequence[Mapping[str, Any]] | None) -> str | None:
     if not runs:
         return None
     summary = runs[-1].get("summary")
     if not isinstance(summary, str) or not summary.strip():
         return None
-    return summary.strip()[:20_000]
+    sanitized = _sanitize_summary(summary)
+    return sanitized or None
 
 
 def _diagnostic_codes(diagnostics: JsonValue | None) -> tuple[str, ...]:

@@ -168,3 +168,22 @@ def test_live_promotion_requires_owner_policy_approval_and_is_reversible(tmp_pat
     )
     assert rollback["result"] == "removed_new_artifact"
     assert not destination.exists()
+
+
+def test_relative_target_rejects_protected_module_filenames() -> None:
+    from followthrough.self_improvement import _relative_target
+
+    # Bare directory names were already blocked; real filenames whose stem names
+    # a protected module must be rejected too, otherwise a gated candidate could
+    # overwrite the control plane or the evaluator itself.
+    for blocked in (
+        "followthrough/controls.py",
+        "followthrough/self_improvement.py",
+        "gates.py",
+        "followthrough/evaluator.py.bak",
+    ):
+        with pytest.raises(ValueError):
+            _relative_target(blocked)
+
+    # An ordinary skill target is still accepted.
+    assert str(_relative_target("research/SKILL.md")) == "research/skill.md"
