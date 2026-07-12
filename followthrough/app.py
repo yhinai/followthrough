@@ -389,16 +389,24 @@ def create_app(config: Settings = settings) -> FastAPI:
             return {"event_id": payload.event_id, "archive_id": archived["id"], "created": False, "status": "archived", "classification": archived["classification"]}
         store.record_relevance(archived["id"], payload.event_id, relevance.to_dict())
         if suppress_dispatch:
+            archive_store.set_classification(
+                archived["id"], relevant=False, classification="aggregate_component"
+            )
             await bus.publish(
                 "archive_only",
-                {"event_id": payload.event_id, "classification": classification.kind},
+                {"event_id": payload.event_id, "classification": "aggregate_component"},
             )
             return {
                 "event_id": payload.event_id,
                 "archive_id": archived["id"],
                 "created": True,
                 "status": "archived",
-                "classification": classification.__dict__,
+                "classification": {
+                    **classification.__dict__,
+                    "actionable": False,
+                    "kind": "aggregate_component",
+                    "reason": "Dispatch is owned by the content-addressed aggregate event",
+                },
                 "relevance": relevance.to_dict(),
                 "operational_memory": False,
                 "dispatch_suppressed_for_aggregate": True,

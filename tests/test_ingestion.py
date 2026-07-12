@@ -102,6 +102,9 @@ def test_phone_fragments_are_centrally_aggregated_before_dispatch(configured_set
     assert second.json()["aggregate_event_id"].startswith("adb-omi:aggregate:")
     assert second.json()["original_event_id"] == "memo-fragment-subject-0002"
     assert app.state.store.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+    component = app.state.archive_store.by_event("memo-fragment-subject-0002")
+    assert component["relevant"] == 0
+    assert component["classification"] == "aggregate_component"
 
 
 def test_payload_limits_fail_before_persistence(configured_settings) -> None:
