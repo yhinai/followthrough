@@ -5,74 +5,30 @@ import os
 import secrets
 from pathlib import Path
 
-from cryptography.exceptions import InvalidTag
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+class ArchiveStorage:
+    """Simple local byte storage for transcripts and audio."""
 
-MAGIC = b"FTA1"
-
-
-class ArchiveIntegrityError(ValueError):
-    pass
-
-
-class ArchiveVault:
-    """Stores archive payloads. Encryption is opt-in via ``encrypt_writes``
-    (off by default for proof-of-concept runs, so payloads are stored as
-    plaintext). Data written while encryption was on stays readable — those
-    envelopes carry the MAGIC prefix and are decrypted with the key file;
-    plaintext payloads pass through untouched.
-    """
-
-    def __init__(self, key_file: Path, audio_dir: Path, encrypt_writes: bool = False) -> None:
-        self.key_file = key_file
+    def __init__(self, audio_dir: Path) -> None:
         self.audio_dir = audio_dir
-        self.encrypt_writes = encrypt_writes
         self.audio_dir.mkdir(parents=True, exist_ok=True)
-
-    def _key(self) -> bytes:
-        try:
-            key = self.key_file.read_bytes()
-        except OSError as exc:
-            raise ArchiveIntegrityError(f"archive key unavailable: {self.key_file}") from exc
-        if len(key) != 32:
-            raise ArchiveIntegrityError("archive key must be exactly 32 bytes")
-        return key
-
-    def encrypt(self, plaintext: bytes, associated_data: bytes) -> bytes:
-        if not self.encrypt_writes:
-            return plaintext
-        nonce = secrets.token_bytes(12)
-        return MAGIC + nonce + AESGCM(self._key()).encrypt(nonce, plaintext, associated_data)
-
-    def decrypt(self, envelope: bytes, associated_data: bytes) -> bytes:
-        if not envelope.startswith(MAGIC):
-            return envelope
-        if len(envelope) < len(MAGIC) + 12 + 16:
-            raise ArchiveIntegrityError("invalid archive envelope")
-        nonce = envelope[len(MAGIC) : len(MAGIC) + 12]
-        ciphertext = envelope[len(MAGIC) + 12 :]
-        try:
-            return AESGCM(self._key()).decrypt(nonce, ciphertext, associated_data)
-        except InvalidTag as exc:
-            raise ArchiveIntegrityError("archive authentication failed") from exc
 
     @staticmethod
     def digest(payload: bytes) -> str:
         return hashlib.sha256(payload).hexdigest()
 
     def audio_path(self, archive_id: str, sequence: int) -> Path:
-        return self.audio_dir / archive_id / f"{sequence:08d}.fta"
+        return self.audio_dir / archive_id / f"{sequence:08d}.audio"
 
-    def write_audio(self, archive_id: str, sequence: int, payload: bytes, associated_data: bytes) -> Path:
+    def write_audio(self, archive_id: str, sequence: int, payload: bytes) -> Path:
         path = self.audio_path(archive_id, sequence)
         path.parent.mkdir(parents=True, exist_ok=True)
-        encrypted = self.encrypt(payload, associated_data)
         temporary = path.with_name(path.name + f".{secrets.token_hex(8)}.tmp")
-        temporary.write_bytes(encrypted)
+        temporary.write_bytes(payload)
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
         return path
 
-    def read_audio(self, path: Path, associated_data: bytes) -> bytes:
-        return self.decrypt(path.read_bytes(), associated_data)
+    @staticmethod
+    def read_audio(path: Path) -> bytes:
+        return path.read_bytes()

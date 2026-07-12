@@ -70,7 +70,7 @@ class TranscriptAggregator:
 
         # Dispatch the shortest contiguous suffix that contains both an action
         # and a subject. Ambient speech that happened before the command remains
-        # in the encrypted component archive but never crosses into the
+        # in the complete component archive but never crosses into the
         # operational aggregate sent to Hermes.
         selected = candidates
         for index in range(len(candidates) - 1, -1, -1):

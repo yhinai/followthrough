@@ -8,16 +8,18 @@ class AuthenticationError(ValueError):
     pass
 
 
-def bearer_token(authorization: str | None, legacy_header: str | None = None) -> str:
+def bearer_token(authorization: str | None) -> str:
     if authorization:
         scheme, separator, value = authorization.partition(" ")
         if separator and scheme.lower() == "bearer" and value.strip():
             return value.strip()
-    return (legacy_header or "").strip()
+    return ""
 
 
 class TokenAuthority:
-    def __init__(self, dashboard_token_file: Path, device_tokens_dir: Path, required: bool = True) -> None:
+    def __init__(
+        self, dashboard_token_file: Path, device_tokens_dir: Path, required: bool = True
+    ) -> None:
         self.dashboard_token_file = dashboard_token_file
         self.device_tokens_dir = device_tokens_dir
         self.required = required
@@ -32,7 +34,11 @@ class TokenAuthority:
     def _device_tokens(self) -> list[str]:
         if not self.device_tokens_dir.is_dir():
             return []
-        return [token for path in sorted(self.device_tokens_dir.glob("*.token")) if (token := self._read(path))]
+        return [
+            token
+            for path in sorted(self.device_tokens_dir.glob("*.token"))
+            if (token := self._read(path))
+        ]
 
     def dashboard(self, candidate: str) -> bool:
         if not self.required:
@@ -44,7 +50,9 @@ class TokenAuthority:
         if not self.required:
             return True
         tokens = self._device_tokens()
-        return bool(candidate and any(hmac.compare_digest(candidate, expected) for expected in tokens))
+        return bool(
+            candidate and any(hmac.compare_digest(candidate, expected) for expected in tokens)
+        )
 
     def dashboard_or_device(self, candidate: str) -> bool:
         return self.dashboard(candidate) or self.device(candidate)

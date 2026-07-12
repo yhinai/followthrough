@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
-        description="Create, verify, or safely stage a Followthrough ciphertext backup."
+        description="Create, verify, or safely stage a Followthrough archive backup."
     )
     commands = result.add_subparsers(dest="command", required=True)
 
@@ -36,7 +36,7 @@ def parser() -> argparse.ArgumentParser:
         "--effects-db", type=Path, default=ROOT / "data" / "effects" / "effects.db"
     )
     create.add_argument(
-        "--encrypted-audio-dir",
+        "--audio-dir",
         type=Path,
         default=ROOT / "data" / "archive" / "audio",
     )
@@ -66,7 +66,7 @@ def main() -> int:
                 operations_db=args.operations_db.expanduser(),
                 archive_db=args.archive_db.expanduser(),
                 effects_db=args.effects_db.expanduser(),
-                encrypted_audio_dir=args.encrypted_audio_dir.expanduser(),
+                audio_dir=args.audio_dir.expanduser(),
                 runner_receipts_dir=args.runner_receipts_dir.expanduser(),
             )
             output = create_backup(sources, args.destination)

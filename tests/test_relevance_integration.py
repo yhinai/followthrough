@@ -1,14 +1,12 @@
 from __future__ import annotations
-
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from followthrough.app import create_app
-from followthrough.archive import ArchiveVault
 from followthrough.relevance import SpeakerContext, evaluate_relevance
-from followthrough.store import Store, now
+from followthrough.store import now
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -56,12 +54,13 @@ def test_archive_is_physically_separate_and_operational_memory_is_relevance_gate
         assert memories.json()[0]["category"] == "repository"
 
     assert app.state.archive_store.by_event("event-separated-0001") is not None
-    assert app.state.store.db.execute("SELECT COUNT(*) FROM archive_events").fetchone()[0] == 0
-    # Both stores run in WAL mode with open connections, so recent writes live in
-    # the -wal/-shm sidecars; scan them too or a plaintext regression would hide
-    # from a main-file-only assertion.
+    assert app.state.store.db.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='archive_events'"
+    ).fetchone()[0] == 0
+    # The operational store never holds transcript text; the archive stores it
+    # as plaintext. Both run in WAL mode, so scan the -wal/-shm sidecars too.
     assert raw.encode() not in _database_bytes(settings.db_path)
-    assert raw.encode() not in _database_bytes(settings.archive_db_path)
+    assert raw.encode() in _database_bytes(settings.archive_db_path)
 
 
 def test_archived_omi_non_owner_correction_restores_ambient_authorization(
@@ -161,11 +160,8 @@ def test_native_non_owner_and_unknown_corrections_remain_fail_closed(
             device_id="native-device",
             source="phone",
             occurred_at=now(),
-            transcript_cipher=app.state.vault.encrypt(
-                raw.encode(),
-                f"transcript:{event_id}".encode(),
-            ),
-            transcript_sha256=app.state.vault.digest(raw.encode()),
+            transcript_bytes=raw.encode(),
+            transcript_sha256=app.state.archive.digest(raw.encode()),
             relevant=False,
             classification=relevance.reason_code,
             metadata={"relevance": relevance.to_dict()},
@@ -238,33 +234,3 @@ def test_interest_mute_and_owner_correction_are_applied(configured_settings) -> 
         assert corrected.json()["relevance"]["dispatch_allowed"] is True
         _wait_completed(app, corrected.json()["run_id"])
     assert app.state.store.db.execute("SELECT COUNT(*) FROM operational_memories").fetchone()[0] == 1
-
-
-def test_legacy_ciphertext_archive_migrates_before_source_rows_are_purged(configured_settings) -> None:
-    settings, _, _ = configured_settings
-    legacy = Store(settings.db_path)
-    vault = ArchiveVault(settings.archive_key_file, settings.audio_dir, encrypt_writes=True)
-    raw = b"legacy encrypted source"
-    event_id = "legacy-split-event-01"
-    archived, _ = legacy.archive_event(
-        event_id=event_id,
-        device_id="legacy",
-        source="api",
-        occurred_at=now(),
-        transcript_cipher=vault.encrypt(raw, f"transcript:{event_id}".encode()),
-        transcript_sha256=vault.digest(raw),
-        relevant=False,
-        classification="low_signal",
-        metadata={"migration_test": True},
-    )
-    assert archived["id"]
-    legacy.db.close()
-
-    app = create_app(settings)
-    with TestClient(app):
-        pass
-    migrated = app.state.archive_store.by_event(event_id)
-    assert migrated is not None
-    assert vault.decrypt(migrated["transcript_cipher"], f"transcript:{event_id}".encode()) == raw
-    assert app.state.store.db.execute("SELECT COUNT(*) FROM archive_events").fetchone()[0] == 0
-    assert app.state.archive_store.integrity_check() is True

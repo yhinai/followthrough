@@ -53,7 +53,7 @@ X-Device-Id: omi-primary
 X-Content-SHA256: <plaintext-sha256>
 Content-Type: audio/ogg
 
-<encrypted-in-transit audio bytes>
+<audio bytes>
 ```
 
 The native contract provides exact transcript/audio correlation, ordered chunks, and digest validation that stock Omi lacks.
@@ -61,14 +61,14 @@ The native contract provides exact transcript/audio correlation, ordered chunks,
 ## Processing policy
 
 - Transcripts are the low-latency control plane.
-- Raw audio is the complete encrypted evidence plane.
+- Raw audio is the complete evidence plane.
 - A valid per-device webhook token authorizes the Omi capture channel for ambient
   dispatch. Relevant speech may therefore be queued for Hermes whether Omi reports
   `is_user=true`, `is_user=false`, or no attribution.
 - Omi speaker fields and the resulting owner/non-owner/unknown status are retained in
-  encrypted archive metadata and decision evidence; ambient authorization does not
+  complete archive metadata and decision evidence; ambient authorization does not
   rewrite speaker identity.
-- Irrelevant speech remains encrypted archive-only and never enters Hermes memory or
+- Irrelevant speech remains complete archive-only and never enters Hermes memory or
   actions, regardless of speaker attribution.
 - Invalid or missing Omi tokens fail closed. The ambient authorization does not apply
   to native unknown or authenticated non-owner contexts.
@@ -82,8 +82,8 @@ Android can continue with the screen locked through its foreground microphone se
 ## Verified on Spark
 
 - Official transcript-shaped edge request: `202` in 93 ms.
-- Official no-header PCM16 edge request: `202` and one encrypted audio chunk.
-- Stored audio: AES-256-GCM ciphertext, mode `0600`.
+- Official no-header PCM16 edge request: `202` and one stored audio chunk.
+- Stored audio: direct local bytes, mode `0600`.
 - Unauthenticated private APIs: `401`.
 - Samsung `SM-F776U1`, Android 17, Omi 1.0.544: three endpoints persisted, all toggles enabled, five-second interval, local `ggml-tiny.bin` ready, foreground microphone active while Dozing.
-- Physical-phone conversation finalization added 35 encrypted events; a screen-off session added 5 more.
+- Physical-phone conversation finalization added 35 stored events; a screen-off session added 5 more.

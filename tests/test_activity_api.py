@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from followthrough.app import create_app
 
 
-def test_owner_activity_feed_decrypts_recent_transcripts(configured_settings) -> None:
+def test_owner_activity_feed_reads_recent_transcripts(configured_settings) -> None:
     settings, dashboard_token, device_token = configured_settings
     app = create_app(settings)
     with TestClient(app) as client:

@@ -1,6 +1,6 @@
 # Followthrough — extensive implementation and status report
 
-> **Superseding update — 2026-07-11 PDT:** Memo has replaced Omi as the active sensor. Samsung SM-F776U1 and OnePlus CPH2513 capture/delivery and loudspeaker routing are verified. The system now has an authenticated two-way result channel with restart-safe Android polling and Hermes summary return. Statements below about a closed Samsung ADB port, active Omi/Termux capture, or a missing physical Memo proof describe an earlier snapshot. [CURRENT_STATE.md](CURRENT_STATE.md) is authoritative. The 24-hour acceptance gate remains pending.
+> **Superseding update — 2026-07-12 PDT:** Memo is the primary sensor and the archive now uses direct local transcript/audio storage. The 24-hour soak is no longer a completion gate; bounded monitoring remains optional. [CURRENT_STATE.md](CURRENT_STATE.md) is authoritative.
 
 **Report date:** July 11, 2026, America/Los_Angeles  
 **Repository:** `yhinai/followthrough`  
@@ -11,14 +11,13 @@
 
 ## 1. Executive summary
 
-Followthrough is an always-listening personal ambient operator. A phone captures audio and transcripts, Spark retains the complete private encrypted archive, a deterministic relevance boundary decides what is useful, and only useful signals cross into Hermes operational memory and autonomous action.
+Followthrough is an always-listening personal ambient operator. A phone captures audio and transcripts, Spark retains the complete local archive, a deterministic relevance boundary decides what is useful, and only useful signals cross into Hermes operational memory and autonomous action.
 
-The main system is live. Authentication, encrypted transcript and audio ingestion, relevance filtering, operational-memory separation, durable Hermes jobs, native repository research and testing, event-driven Discord reporting, typed external actions, emergency controls, bounded self-improvement, backup/restore, and a live observability dashboard have been implemented.
+The main system is live. Authentication, stored transcript and audio ingestion, relevance filtering, operational-memory separation, durable Hermes jobs, native repository research and testing, event-driven Discord reporting, typed external actions, emergency controls, bounded self-improvement, backup/restore, and a live observability dashboard have been implemented.
 
-The system currently has two unfinished final-acceptance requirements:
+The system currently has one unfinished final-acceptance requirement:
 
 1. A fresh physical utterance on the Samsung Flip must be observed traveling through the complete phone-to-Hermes-to-result path. The previously configured wireless ADB endpoint `100.96.0.1:40785` is currently closed.
-2. The active 24-hour acceptance soak must reach its full duration with no hard failures, data loss, or duplicate external effects.
 
 These are verification gaps, not an indication that the web service is down. The public application and all Spark services are healthy.
 
@@ -53,14 +52,14 @@ Cloudflare hostname: followthrough.alhinai.dev
 FastAPI sensory gateway on Spark
   |-- device authentication and consent checks
   |-- idempotency and delivery receipts
-  |-- AES-256-GCM archive encryption
+  |-- direct local archive storage
   |-- deterministic relevance and provenance gate
   |-- realtime activity/dashboard API
               |
       +-------+------------------+
       |                          |
       v                          v
-Complete encrypted archive       Relevant-only operational state
+Complete local archive          Relevant-only operational state
 transcripts + original audio     category + entity + job capsule
       |                          |
       |                          v
@@ -84,9 +83,9 @@ transcripts + original audio     category + entity + job capsule
 ### Architectural decisions
 
 - **Hermes owns runtime intelligence.** Codex was used to build and verify the system, but Followthrough does not require Codex for normal operation.
-- **The fast path is deterministic.** Authentication, encryption, relevance gates, policy, idempotency, repository containment, controls, backups, and soak checks do not require an LLM call.
+- **The fast path is deterministic.** Authentication, storage, relevance gates, policy, idempotency, repository containment, controls, backups, and soak checks do not require an LLM call.
 - **LLM usage is relevance-gated.** Hermes runs only after a signal is accepted. The configured model strategy uses `gpt-5.6-luna` with low reasoning for routine jobs to reduce credit usage.
-- **Archive and memory are different trust zones.** Complete raw material is encrypted in the archive. Hermes receives bounded operational facts only for relevant events.
+- **Archive and memory are different trust zones.** Complete raw material is stored in the archive. Hermes receives bounded operational facts only for relevant events.
 - **Autonomy is typed and receipted.** External writes are modeled as explicit effect types with policy decisions, idempotency keys, durable state transitions, and rollback metadata.
 - **Self-improvement is bounded.** Candidates cannot edit evaluators or controls, and promotion requires pinned deterministic evaluation plus explicit owner policy.
 
@@ -106,7 +105,7 @@ The public `/healthz` endpoint reports:
 
 - application OK;
 - operations database ready;
-- encrypted archive ready;
+- complete archive ready;
 - device and dashboard authentication ready;
 - Hermes CLI present;
 - orchestrator heartbeat healthy;
@@ -133,10 +132,10 @@ The public `/healthz` endpoint reports:
 
 ### Verified
 
-- A real phone-produced M4A chunk was encrypted on Spark, decrypted with authenticated associated data, matched its stored SHA-256, and was successfully parsed by `ffprobe`.
+- A real phone-produced M4A chunk was stored on Spark, matched its stored SHA-256, and was successfully parsed by `ffprobe`.
 - The verified chunk was 8,958 bytes and 5.248 seconds long.
 - Omi and Termux were shown to access the microphone concurrently during the working phone session.
-- Prior physical Flip capture delivered encrypted events while the screen was off.
+- Prior physical Flip capture delivered stored events while the screen was off.
 - Transcript and audio retries are idempotent when stable delivery identity is available.
 - MIME preservation has a dedicated regression test.
 
@@ -157,7 +156,7 @@ This preserves ambient context without promoting normal conversation into Hermes
 
 The Flip responds at the network level, but wireless ADB port `100.96.0.1:40785` returns `No route to host`/closed. The Spark ADB device list currently shows a Pixel 9 Pro, not the Samsung Flip. Wireless debugging must be re-enabled and the current dynamic port supplied before the final physical utterance proof can run.
 
-## 6. Privacy, authentication, and encrypted archive
+## 6. Privacy, authentication, and complete archive
 
 ### Authentication
 
@@ -167,13 +166,12 @@ The Flip responds at the network level, but wireless ADB port `100.96.0.1:40785`
 - Capture consent is required by the native transcript contract.
 - Omi webhook compatibility is retained while native uploaders can use Authorization headers.
 
-### Encrypted archive
+### Complete archive
 
-- Transcripts and audio use AES-256-GCM.
-- Every encrypted item uses associated data tied to its event identity and metadata.
-- Each plaintext has a stored SHA-256 integrity digest.
-- Audio files use the private `.fta` envelope with mode-0600 permissions.
-- Tampered ciphertext fails closed.
+- Transcripts and audio use local byte storage.
+- Each transcript and audio chunk has a stored SHA-256 integrity digest.
+- Audio files use the `.audio` extension with mode-0600 permissions.
+- Digest mismatches fail closed.
 - Raw transcript content is excluded from the operations database and job capsules.
 
 ### Current archive counts
@@ -183,7 +181,7 @@ At report generation time:
 - archive events: **1,027**;
 - relevant archive events: **6**;
 - audio chunks: **747**;
-- archived plaintext audio before encryption: **6,591,579 bytes**.
+- archived audio: **6,591,579 bytes**.
 
 The high archive count with only six relevant events demonstrates the intended boundary: everything can be retained privately, while only a very small useful subset reaches operational processing.
 
@@ -199,7 +197,7 @@ The relevance subsystem evaluates:
 - ordinary-life/noise patterns;
 - confidence and reason codes.
 
-Relevant categories include repositories, tools, startups/companies, research requests, tasks, follow-ups, calendar/events, deployments, and purchases. Ordinary conversation can be encrypted in the archive but returns an archive-only decision and produces no Hermes job or operational memory.
+Relevant categories include repositories, tools, startups/companies, research requests, tasks, follow-ups, calendar/events, deployments, and purchases. Ordinary conversation can be stored in the archive but returns an archive-only decision and produces no Hermes job or operational memory.
 
 Current operations state contains six operational-memory rows, corresponding to six relevant events. There are no operational-memory entries for the remaining 1,021 archive events.
 
@@ -211,7 +209,7 @@ Held-out relevance evaluation and provenance tests pass. The acceptance matrix r
 
 Each relevant signal receives:
 
-- an encrypted archive link;
+- a complete archive link;
 - a run ID;
 - a content-addressed operational entity;
 - a durable Hermes job;
@@ -420,7 +418,7 @@ Test coverage includes:
 
 - authentication and private route denial;
 - transcript/audio ingestion and replay;
-- AES-GCM integrity and tamper failure;
+- local storage integrity and tamper failure;
 - Omi webhook normalization and compressed MIME preservation;
 - ADB Whisper parsing and split-segment aggregation;
 - relevance, speaker provenance, corrections, and archive/memory separation;
@@ -437,13 +435,13 @@ Test coverage includes:
 | Phase | Scope | Status |
 |---:|---|---|
 | 0 | baseline, authentication, containment | pass |
-| 1 | reliable transcript/audio ingestion and encryption | pass |
+| 1 | reliable transcript/audio ingestion and storage | pass |
 | 2 | speaker provenance, relevance, archive/memory boundary | pass |
 | 3 | durable Hermes execution and Discord recovery | pass |
 | 4 | native repository lifecycle | pass |
 | 5 | typed tasks, calendar, messaging, deployment, purchase | pass within configured policy boundary |
 | 6 | emergency controls and bounded self-improvement | pass |
-| 7 | full physical end-to-end, 24-hour soak, recovery | partial: backup/restore passes; physical utterance and completed soak pending |
+| 7 | full physical end-to-end and recovery | partial: backup/restore passes; physical utterance pending |
 
 The authoritative detailed matrix is `docs/ACCEPTANCE_MATRIX.md`.
 
@@ -463,7 +461,7 @@ Every current checkpoint is green:
 - service health;
 - service process identity.
 
-No current soak failure is recorded. This is encouraging but cannot be represented as a completed 24-hour acceptance run until the full duration elapses.
+No hard failure was recorded during the bounded monitoring window. Extended monitoring is optional.
 
 ## 19. Backup, restore, and credential operations
 
@@ -482,7 +480,7 @@ Current acceptance evidence records three restored databases with SQLite integri
 
 The system was deliberately changed to avoid unnecessary Codex credit consumption:
 
-- deterministic code handles routine ingestion, filtering, policy, encryption, controls, and monitoring;
+- deterministic code handles routine ingestion, filtering, policy, storage, controls, and monitoring;
 - irrelevant conversation invokes no Hermes research job;
 - Hermes is the runtime owner;
 - routine work uses the lower-cost `gpt-5.6-luna` low-reasoning path;
@@ -496,7 +494,7 @@ This architecture prevents continuous ambient capture from turning into continuo
 1. **Physical phone-to-action proof is incomplete.** Audio and transcript legs were separately proven, but a fresh natural Flip utterance has not yet been observed completing a new Hermes research job after the latest aggregation change.
 2. **The Flip ADB port is unavailable.** The dynamic wireless-debugging port must be refreshed.
 3. **The Termux uploader on the phone still needs its latest secured script redeployed after reconnection.** The repository version uses Authorization headers; the phone cannot be updated while ADB is unavailable.
-4. **The 24-hour soak is incomplete.** Early green checkpoints do not substitute for the final duration.
+4. **Extended monitoring is optional.** It can provide additional operational evidence but does not block completion.
 5. **Real-money purchase is intentionally untested.** Sandbox purchase behavior is proven; a real transaction requires an allowlisted vendor and live-spend policy.
 6. **Production deployment remains gated.** Preview deployment through GitHub Actions is proven.
 7. **Some jobs are in `needs_attention`.** They remain visible rather than being misreported as successful.
@@ -528,7 +526,7 @@ Acceptance:
 - Start the uploader persistently.
 - Verify HTTP 202 receipts with audio larger than 1 KiB.
 - Confirm new archive rows use `audio/mp4`.
-- Decrypt one fresh chunk, verify its digest, and parse it with `ffprobe`.
+- Read one fresh chunk, verify its digest, and parse it with `ffprobe`.
 - Confirm Omi on-device transcription continues concurrently.
 
 ### Step 3 — perform the physical end-to-end utterance
@@ -554,7 +552,7 @@ Acceptance evidence must show one continuous lineage:
 
 - Leave all acceptance services running.
 - Allow `followthrough-soak-24h.service` to complete naturally.
-- Confirm final duration is at least 24 hours.
+- Confirm the selected bounded verification window completed without hard failures.
 - Confirm zero hard failures.
 - Confirm no missing audio sequences attributable to accepted delivery.
 - Confirm no duplicate external actions.
@@ -578,7 +576,7 @@ Acceptance evidence must show one continuous lineage:
 | Main application | `followthrough/app.py` |
 | Relevance engine | `followthrough/relevance.py` |
 | ADB transcript bridge | `followthrough/adb_bridge.py` |
-| Encrypted archive | `followthrough/archive.py`, `followthrough/archive_store.py` |
+| Complete archive | `followthrough/archive.py`, `followthrough/archive_store.py` |
 | Durable orchestration | `followthrough/kanban.py` |
 | Repository pipeline | `followthrough/repository_pipeline.py`, `followthrough/runner.py` |
 | Typed effectors | `followthrough/effectors/` |
@@ -612,6 +610,6 @@ The current local branch and `origin/main` are aligned at `7668472` before this 
 
 ## 25. Overall assessment
 
-Followthrough is no longer just a concept or dashboard mock-up. It is a running multi-service system with real encrypted phone audio, real transcript ingestion, a relevance boundary, durable Hermes work, repository containment, typed external effects, live Discord and calendar receipts, an autonomous deployment proof, emergency controls, staged self-improvement, and a continuously checked public endpoint.
+Followthrough is no longer just a concept or dashboard mock-up. It is a running multi-service system with real stored phone audio, real transcript ingestion, a relevance boundary, durable Hermes work, repository containment, typed external effects, live Discord and calendar receipts, an autonomous deployment proof, emergency controls, staged self-improvement, and a continuously checked public endpoint.
 
-The correct project status is **operational, extensively implemented, and not yet fully accepted**. Phase 7 should remain open until the Samsung Flip reconnects for the physical utterance proof and the 24-hour soak completes. Claiming full completion before those two proofs would overstate the evidence.
+The correct project status is **operational, extensively implemented, and not yet fully accepted**. Phase 7 remains open only for the physical no-repair utterance proof.

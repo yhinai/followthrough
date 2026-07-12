@@ -19,9 +19,7 @@ def _open_settings(tmp_path: Path) -> Settings:
         secrets_dir=secrets_dir,
         dashboard_token_file=secrets_dir / "dashboard.token",
         device_tokens_dir=secrets_dir / "devices",
-        archive_key_file=secrets_dir / "archive.key",
         require_auth=False,
-        encrypt_archive=False,
         public_url="https://example.test",
         kanban_enabled=False,
     )
@@ -40,7 +38,6 @@ def test_open_mode_needs_no_tokens_or_key(tmp_path: Path) -> None:
         health = client.get("/healthz").json()
         assert health["ok"] is True
         assert health["auth_required"] is False
-        assert health["archive_encrypted"] is False
 
         assert client.post("/api/v1/transcripts", json=payload).status_code == 202
         assert client.get("/api/runs").status_code == 200
@@ -50,8 +47,8 @@ def test_open_mode_needs_no_tokens_or_key(tmp_path: Path) -> None:
 
     row = app.state.archive_store.by_event(payload["event_id"])
     assert row is not None
-    assert row["transcript_cipher"] == payload["text"].encode()
-    assert app.state.vault.decrypt(row["transcript_cipher"], b"transcript:event-open-0001").decode() == payload["text"]
+    assert row["transcript_bytes"] == payload["text"].encode()
+    assert row["transcript_bytes"].decode() == payload["text"]
 
 
 def test_open_mode_ignores_stale_token_files(tmp_path: Path) -> None:

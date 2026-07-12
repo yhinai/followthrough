@@ -35,7 +35,7 @@ class BackupSources:
     operations_db: Path
     archive_db: Path
     effects_db: Path
-    encrypted_audio_dir: Path
+    audio_dir: Path
     runner_receipts_dir: Path
 
 
@@ -261,7 +261,7 @@ def _reject_recursive_destination(destination: Path, sources: Iterable[Path]) ->
 
 
 def create_backup(sources: BackupSources, destination: Path) -> VerificationResult:
-    """Create an atomic, owner-only backup without decrypting any source artifact."""
+    """Create an atomic, owner-only backup without decoding any source artifact."""
 
     destination = destination.expanduser().absolute()
     if destination.exists() or destination.is_symlink():
@@ -269,10 +269,10 @@ def create_backup(sources: BackupSources, destination: Path) -> VerificationResu
     _require_regular_file(sources.operations_db, label="operations database")
     _require_regular_file(sources.archive_db, label="archive database")
     _require_regular_file(sources.effects_db, label="effects database")
-    _require_directory(sources.encrypted_audio_dir, label="encrypted audio directory")
+    _require_directory(sources.audio_dir, label="audio directory")
     _require_directory(sources.runner_receipts_dir, label="runner receipts directory")
     _reject_recursive_destination(
-        destination, (sources.encrypted_audio_dir, sources.runner_receipts_dir)
+        destination, (sources.audio_dir, sources.runner_receipts_dir)
     )
 
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -282,7 +282,7 @@ def create_backup(sources: BackupSources, destination: Path) -> VerificationResu
         _make_directory(staging)
         databases_dir = staging / "databases"
         files_dir = staging / "files"
-        audio_dir = files_dir / "encrypted-audio"
+        audio_dir = files_dir / "audio"
         receipts_dir = files_dir / "runner-receipts"
         for directory in (databases_dir, files_dir, audio_dir, receipts_dir):
             _make_directory(directory)
@@ -290,7 +290,7 @@ def create_backup(sources: BackupSources, destination: Path) -> VerificationResu
         entries: list[dict[str, Any]] = [
             _directory_entry("databases", category="layout"),
             _directory_entry("files", category="layout"),
-            _directory_entry("files/encrypted-audio", category="encrypted_audio"),
+            _directory_entry("files/audio", category="audio"),
             _directory_entry("files/runner-receipts", category="runner_receipts"),
         ]
         database_sources = (
@@ -305,10 +305,10 @@ def create_backup(sources: BackupSources, destination: Path) -> VerificationResu
 
         entries.extend(
             _copy_tree(
-                sources.encrypted_audio_dir,
+                sources.audio_dir,
                 audio_dir,
                 staging,
-                category="encrypted_audio",
+                category="audio",
             )
         )
         entries.extend(
@@ -325,8 +325,8 @@ def create_backup(sources: BackupSources, destination: Path) -> VerificationResu
             "backup_id": backup_id,
             "created_at": _utc_now(),
             "content_policy": {
-                "archive": "ciphertext_only",
-                "encrypted_audio": "opaque_copy",
+                "archive": "complete_archive",
+                "audio": "opaque_copy",
                 "runner_receipts": "opaque_copy",
                 "secrets_included": False,
             },
@@ -374,8 +374,8 @@ def _load_manifest(backup: Path) -> dict[str, Any]:
     if not isinstance(manifest.get("backup_id"), str) or not manifest["backup_id"]:
         raise BackupVerificationError("manifest backup id is missing")
     expected_policy = {
-        "archive": "ciphertext_only",
-        "encrypted_audio": "opaque_copy",
+        "archive": "complete_archive",
+        "audio": "opaque_copy",
         "runner_receipts": "opaque_copy",
         "secrets_included": False,
     }
@@ -453,7 +453,7 @@ def verify_backup(backup: Path) -> VerificationResult:
     required_structure = {
         ("databases", "directory", "layout"),
         ("files", "directory", "layout"),
-        ("files/encrypted-audio", "directory", "encrypted_audio"),
+        ("files/audio", "directory", "audio"),
         ("files/runner-receipts", "directory", "runner_receipts"),
         ("databases/operations.db", "file", "database:operations"),
         ("databases/archive.db", "file", "database:archive"),

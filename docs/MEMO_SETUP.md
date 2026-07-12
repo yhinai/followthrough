@@ -9,7 +9,7 @@ Samsung Flip microphone
   -> Memo AlwaysListeningService
   -> five-second PCM16 chunks + finalized Gemini input transcripts
   -> https://followthrough.alhinai.dev
-  -> encrypted archive
+  -> complete local archive
   -> relevance gate
   -> relevant-only Hermes job
   -> authenticated status/result polling
@@ -37,7 +37,7 @@ The endpoint defaults to `https://followthrough.alhinai.dev`. Endpoint, token, a
 
 - Omi (`com.friend.ios`) process stopped and microphone permission revoked.
 - Termux audio uploader stopped.
-- Legacy `followthrough-adb-bridge.service` disabled and stopped.
+- Unused `followthrough-adb-bridge.service` disabled and stopped.
 - Memo foreground microphone service active.
 - Followthrough accepted real Memo PCM audio and finalized transcripts.
 - Audio continued after the app left the foreground.

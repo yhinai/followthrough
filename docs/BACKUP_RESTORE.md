@@ -1,4 +1,4 @@
-# Encrypted backup and staged restore
+# Backup and staged restore
 
 Android pending job IDs live in each phone's private app preferences. Spark remains authoritative for archive, run, job, result, and audit state.
 
@@ -6,14 +6,13 @@ Followthrough backups preserve the three durable ledgers and the opaque runtime 
 for recovery:
 
 - `data/followthrough.db` (operations);
-- `data/archive/archive.db` (ciphertext-only transcript archive);
+- `data/archive/archive.db` (archive-only transcript archive);
 - `data/effects/effects.db` (typed effects and receipts);
-- encrypted `.fta` audio chunks; and
+- `.audio` chunks; and
 - runner receipt files.
 
-The backup path is deliberately allowlisted. Device tokens, the archive key, OAuth credentials,
-`.env` files, Hermes state, decrypted transcripts, and runner workspaces are not read or copied.
-Audio and receipts are copied byte-for-byte without parsing or decryption.
+The backup path is deliberately allowlisted. Device tokens, OAuth credentials, `.env` files,
+Hermes state, and runner workspaces are not copied. Audio and receipts are copied byte-for-byte.
 
 ## Create and verify
 
@@ -34,8 +33,8 @@ SHA-256 digest, byte size, mode, category, and relative path of each payload. A 
 `manifest.sha256` detects manifest modification. Verification also rejects symlinks, special
 files, missing or extra paths, unsafe modes, and corrupt SQLite snapshots.
 
-This is an integrity manifest, not a digital signature. Store the backup on encrypted storage and
-protect the transport separately.
+This is an integrity manifest, not a digital signature. Protect the backup location and transport
+separately.
 
 ## Restore rehearsal
 
@@ -57,7 +56,6 @@ The restore command itself cannot overwrite a nonempty directory.
 
 ## Verification boundary
 
-The backup layer proves a consistent copy and byte-level restore. It intentionally never decrypts
-an archive item, so a complete disaster-recovery drill should separately test decryption with the
-owner-held archive key in an isolated recovery environment. That key must be recovered from its
-independent secret backup; it is never part of this bundle.
+The backup layer proves a consistent copy and byte-level restore. A complete disaster-recovery
+drill should also start Followthrough from the restored databases and verify one transcript and
+audio item through the normal API.

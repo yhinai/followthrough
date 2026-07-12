@@ -13,7 +13,7 @@ Claude Code 2.1.207 ran from the Followthrough repository with model `fable`, hi
 7. Reject protected self-improvement targets by filename stem as well as directory.
 8. Remove a two-transaction false positive from capture continuity monitoring while retaining interior-hole detection.
 9. Parse optional-fraction logcat clocks and convert device-local time to UTC correctly.
-10. Fail closed for device access to legacy audio events without a capture principal; the owner dashboard remains authorized.
+10. Fail closed for device access to audio events without a capture principal; the owner dashboard remains authorized.
 11. Scan SQLite WAL/SHM sidecars in plaintext-leak regression assertions.
 
 ## Independent verification

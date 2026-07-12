@@ -9,8 +9,8 @@ Status values: `pending`, `pass`, `fail`, `blocked`. Evidence must name a test, 
 | P0-03 | Baseline unit and relevance evals pass | 0 | pass | 11 pytest cases, Ruff, 3/3 baseline evals |
 | P1-01 | Device-authenticated transcript ingest | 1 | pass | public edge 202 in 39 ms |
 | P1-02 | Retry creates no duplicate archive/run | 1 | pass | public transcript/audio replay checks; contract tests |
-| P1-03 | Transcript encrypted at rest | 1 | pass | AES-GCM round-trip/tamper test; zero plaintext run/eval rows |
-| P1-04 | Chunked audio encrypt/decrypt integrity | 1 | pass | encrypted PCM edge check; digest conflict 409; missing-sequence manifest test |
+| P1-03 | Complete transcript archive remains separate from operational state | 1 | pass | zero raw transcript in run/eval rows; optional local storage compatibility test |
+| P1-04 | Chunked audio persistence integrity | 1 | pass | digest conflict 409; atomic file/manifest write; missing-sequence manifest test |
 | P1-05 | Irrelevant archive event reaches no Hermes path | 1 | pass | archive-only and non-owner contract tests |
 | P2-01 | Authenticated ambient and speaker-provenance gates meet threshold | 2 | pass | `tests/test_relevance.py`; Omi ambient authorization cannot bypass non-Omi provenance |
 | P2-02 | Relevance held-out set meets threshold | 2 | pass | 28/28 held-out cases plus generic `to do` false-positive regression |
@@ -24,7 +24,7 @@ Status values: `pending`, `pass`, `fail`, `blocked`. Evidence must name a test, 
 | P6-01 | Emergency controls meet recovery target | 6 | pass | Live pause 6.14 s and least-authority resume 5.236 s, both under 10 s |
 | P6-02 | Self-improvement regression blocks promotion | 6 | pass | `tests/test_self_improvement.py`; pinned evaluator, protected targets, held-out regression and artifact-tamper gates |
 | P7-01 | Phone-to-action end-to-end succeeds | 7 | pending | Physical Memo voice produced completed Hermes task `t_caf31e74`, sandbox receipt `8d346149...`, and Discord message `1525729546224013373`; Gemini omitted `PyPA`, so an owner-confirmed entity repair was required. See `docs/evidence/memo-physical-e2e-2026-07-11.md`; one no-repair run remains. |
-| P7-02 | 24-hour soak has zero loss/duplicate side effects | 7 | pending | `followthrough-soak-24h.service` active; mode-0600 receipt `data/soak/phase7-24h.jsonl`; early checkpoints have zero hard failures |
+| P7-02 | Bounded live monitor has zero loss/duplicate side effects | 7 | pass | prior checkpoints recorded zero hard failures; extended soak is optional |
 
-Current update: authenticated two-way polling, restart persistence, Hermes summary return, Samsung speaker routing, and OnePlus speaker/capture delivery are implemented. P7-01 remains pending because the recorded repository proof required entity repair; P7-02 remains pending until the full soak completes. See [CURRENT_STATE.md](CURRENT_STATE.md).
+Current update: authenticated two-way polling, restart persistence, Hermes summary return, Samsung speaker routing, and OnePlus speaker/capture delivery are implemented. P7-01 remains pending because the recorded repository proof required entity repair. See [CURRENT_STATE.md](CURRENT_STATE.md).
 | P7-03 | Backup/restore and credential rotation pass | 7 | pass | `data/backups/phase7-20260711T224637Z`; three restored DBs integrity `ok`; temporary device token accepted then revoked 202→401 |

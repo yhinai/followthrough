@@ -16,7 +16,7 @@ The monitor samples:
   repeats are diagnostic warnings; only stable-key or provider-receipt
   collisions fail the checkpoint);
 - native audio chunk and Omi capture-stream sequence gaps, orphan rows,
-  missing/empty encrypted audio files, and broken archive-to-operations links;
+  missing/empty stored audio files, and broken archive-to-operations links;
 - the full SHA-256 `control_audit` chain;
 - effect-to-transition journal links;
 - user-service PID, restart counter, active state, and PID changes between
@@ -24,7 +24,7 @@ The monitor samples:
 - free bytes and percentage used for every distinct monitored filesystem; and
 - table-count regressions between checkpoints as a loss signal.
 
-It does not decrypt transcripts or audio, emit raw event/job/effect keys, inject
+It does not read transcripts or audio, emit raw event/job/effect keys, inject
 faults, mutate a database, stop/restart a service, or execute a recovery action.
 Only the checkpoint directory/file is created. Run deliberate restart,
 corruption, network-loss, backup/restore, and disk-pressure exercises as separate

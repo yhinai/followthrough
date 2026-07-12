@@ -41,12 +41,12 @@ def _sources(tmp_path: Path) -> tuple[BackupSources, list[sqlite3.Connection]]:
     effects = tmp_path / "live" / "effects" / "effects.db"
     connections = [
         _database(operations, value=b"committed operation", wal=True),
-        _database(archive, value=b"\x00ciphertext-only\xff", wal=True),
+        _database(archive, value=b"\x00archived\xff", wal=True),
         _database(effects, value=b"typed effect receipt", wal=True),
     ]
     audio = tmp_path / "live" / "archive" / "audio"
     (audio / "event-1").mkdir(parents=True)
-    (audio / "event-1" / "00000000.fta").write_bytes(b"\x00FTA-encrypted-audio\xff")
+    (audio / "event-1" / "00000000.audio").write_bytes(b"audio-bytes")
     receipts = tmp_path / "live" / "runner" / "receipts"
     receipts.mkdir(parents=True)
     (receipts / "run-1.json").write_bytes(b'{"result":"sandboxed","exit_code":0}')
@@ -55,7 +55,7 @@ def _sources(tmp_path: Path) -> tuple[BackupSources, list[sqlite3.Connection]]:
             operations_db=operations,
             archive_db=archive,
             effects_db=effects,
-            encrypted_audio_dir=audio,
+            audio_dir=audio,
             runner_receipts_dir=receipts,
         ),
         connections,
@@ -67,9 +67,9 @@ def _close(connections: list[sqlite3.Connection]) -> None:
         connection.close()
 
 
-def test_create_is_consistent_private_and_opaque(tmp_path: Path) -> None:
+def test_create_is_consistent_private_and_allowlisted(tmp_path: Path) -> None:
     sources, connections = _sources(tmp_path)
-    secret_file = tmp_path / "live" / "archive.key"
+    secret_file = tmp_path / "live" / "device.token"
     secret_file.write_bytes(SECRET_TOKEN)
     destination = tmp_path / "backups" / "backup-1"
     try:
@@ -91,8 +91,8 @@ def test_create_is_consistent_private_and_opaque(tmp_path: Path) -> None:
     finally:
         operations_copy.close()
     assert (
-        destination / "files" / "encrypted-audio" / "event-1" / "00000000.fta"
-    ).read_bytes() == b"\x00FTA-encrypted-audio\xff"
+        destination / "files" / "audio" / "event-1" / "00000000.audio"
+    ).read_bytes() == b"audio-bytes"
     assert (
         destination / "files" / "runner-receipts" / "run-1.json"
     ).read_bytes() == b'{"result":"sandboxed","exit_code":0}'
@@ -102,8 +102,8 @@ def test_create_is_consistent_private_and_opaque(tmp_path: Path) -> None:
     assert RAW_TRANSCRIPT not in all_bytes
     manifest = json.loads((destination / MANIFEST_NAME).read_text())
     assert manifest["content_policy"] == {
-        "archive": "ciphertext_only",
-        "encrypted_audio": "opaque_copy",
+        "archive": "complete_archive",
+        "audio": "opaque_copy",
         "runner_receipts": "opaque_copy",
         "secrets_included": False,
     }
@@ -145,9 +145,9 @@ def test_verify_rejects_unmanifested_files(tmp_path: Path) -> None:
 
 def test_source_symlink_aborts_without_partial_destination(tmp_path: Path) -> None:
     sources, connections = _sources(tmp_path)
-    external = tmp_path / "outside.fta"
+    external = tmp_path / "outside.audio"
     external.write_bytes(b"outside")
-    (sources.encrypted_audio_dir / "bad.fta").symlink_to(external)
+    (sources.audio_dir / "bad.audio").symlink_to(external)
     destination = tmp_path / "backups" / "backup"
     try:
         with pytest.raises(BackupError, match="symlinks are not allowed"):
@@ -162,7 +162,7 @@ def test_destination_cannot_be_inside_copied_tree(tmp_path: Path) -> None:
     sources, connections = _sources(tmp_path)
     try:
         with pytest.raises(BackupError, match="cannot be inside"):
-            create_backup(sources, sources.encrypted_audio_dir / "backup")
+            create_backup(sources, sources.audio_dir / "backup")
     finally:
         _close(connections)
 
@@ -206,7 +206,7 @@ def test_restore_round_trip_reverifies_and_does_not_modify_backup(tmp_path: Path
     assert verify_backup(target) == original
     connection = sqlite3.connect(target / "databases" / "archive.db")
     try:
-        assert connection.execute("SELECT payload FROM ledger").fetchone()[0] == b"\x00ciphertext-only\xff"
+        assert connection.execute("SELECT payload FROM ledger").fetchone()[0] == b"\x00archived\xff"
     finally:
         connection.close()
 

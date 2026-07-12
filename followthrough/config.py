@@ -33,16 +33,13 @@ class Settings(BaseSettings):
     secrets_dir: Path = Path.home() / ".config" / "followthrough"
     dashboard_token_file: Path = Path.home() / ".config" / "followthrough" / "dashboard.token"
     device_tokens_dir: Path = Path.home() / ".config" / "followthrough" / "devices"
-    archive_key_file: Path = Path.home() / ".config" / "followthrough" / "archive.key"
-    require_auth: bool = False
-    encrypt_archive: bool = False
+    require_auth: bool = True
     max_transcript_bytes: int = 65_536
     max_audio_chunk_bytes: int = 8_388_608
     # Upper bound on a single event's audio chunk index. Bounds the manifest's
     # dense-range continuity scan so a sparse sequence cannot force a huge
     # allocation.
     max_audio_sequence: int = 100_000
-    webhook_token: str = ""  # legacy only; file-backed device tokens are preferred
     discord_target: str = "discord:1510104161612730378"
     auto_send: bool = True
     hermes_bin: str = "hermes"
@@ -80,7 +77,6 @@ class Settings(BaseSettings):
         self.secrets_dir = Path(self.secrets_dir).expanduser().resolve()
         self.dashboard_token_file = Path(self.dashboard_token_file).expanduser().resolve()
         self.device_tokens_dir = Path(self.device_tokens_dir).expanduser().resolve()
-        self.archive_key_file = Path(self.archive_key_file).expanduser().resolve()
         self.hermes_python = Path(self.hermes_python).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.archive_db_path.parent.mkdir(parents=True, exist_ok=True)

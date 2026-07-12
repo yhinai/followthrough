@@ -39,7 +39,7 @@ async function sendSignal(text) {
   $("#submit").textContent = "Archiving and triaging…";
   try {
     const result = await jsonApi("/api/signals", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text, source:browserListening ? "voice" : "demo", consent:true})});
-    if (result.status === "archived") window.alert("Encrypted archive only — relevance correctly suppressed actions.");
+    if (result.status === "archived") window.alert("Archive only — relevance correctly suppressed actions.");
     await load();
   } catch (error) { window.alert(`Followthrough failed: ${error.message}`); }
   finally { $("#submit").disabled = false; $("#submit").textContent = "Run through Hermes →"; }

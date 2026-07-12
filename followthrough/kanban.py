@@ -98,7 +98,7 @@ def _decode_json(output: str) -> JsonValue:
 
 
 def _records(value: JsonValue, *keys: str) -> list[dict[str, Any]]:
-    """Normalize current and legacy CLI list envelopes."""
+    """Normalize supported CLI list envelopes."""
 
     candidate: Any = value
     if isinstance(candidate, dict):
@@ -113,7 +113,7 @@ def _records(value: JsonValue, *keys: str) -> list[dict[str, Any]]:
 
 
 def _object(value: JsonValue, *keys: str) -> dict[str, Any]:
-    """Normalize current and legacy CLI object envelopes."""
+    """Normalize supported CLI object envelopes."""
 
     if not isinstance(value, dict):
         raise KanbanCommandError("Hermes returned an unexpected JSON shape")

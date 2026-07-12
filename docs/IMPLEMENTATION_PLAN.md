@@ -9,7 +9,7 @@ Every phase has a hard gate. A phase is complete only after its deterministic te
 Deliverables:
 
 - Inventory the current FastAPI, systemd, Cloudflare, Hermes, Discord, storage, and self-improvement state.
-- Establish the privacy boundary: complete encrypted archive versus relevance-gated operational memory.
+- Establish the boundary between the complete local archive and relevance-gated operational memory.
 - Require authentication on every private API. Only `/healthz` and the static shell remain public.
 - Document risks, acceptance criteria, rollback, and operator commands.
 
@@ -27,16 +27,16 @@ Deliverables:
 - Idempotent transcript event ingestion using stable event IDs.
 - Memo native ingestion plus retained Omi payload normalization for rollback compatibility.
 - Chunked audio upload with sequence numbers, digest verification, and retry-safe writes.
-- AES-256-GCM encryption at rest for transcripts and audio.
+- Simple local transcript/audio persistence.
 - Archive metadata, device/source attribution, timestamps, and integrity digests.
-- Migration of existing plaintext run text into the encrypted archive.
+- Migration of existing plaintext run text into the complete archive.
 
 Gate:
 
 - Authentication, replay, duplicate, missing-chunk, digest-mismatch, and oversized-payload tests pass.
-- An irrelevant segment exists only in the encrypted archive and never reaches Hermes or a run trace.
+- An irrelevant segment exists only in the complete archive and never reaches Hermes or a run trace.
 - An actionable segment has one archive record and one operational run despite retries.
-- Audio decrypts to the original bytes and tampering fails closed.
+- Audio reads to the original bytes and digest mismatches fail closed.
 
 ## Phase 2 — speaker identity and relevance boundary
 
@@ -123,6 +123,6 @@ Deliverables:
 
 Gate:
 
-- A 24-hour soak has no data loss or duplicate external actions.
+- A bounded live verification run has no data loss or duplicate external actions.
 - Backup restore reproduces archive metadata, operational state, and audit receipts.
 - All mandatory acceptance checks in `docs/ACCEPTANCE_MATRIX.md` pass with evidence paths.

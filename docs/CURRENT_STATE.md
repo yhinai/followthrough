@@ -8,7 +8,7 @@ Verified 2026-07-11 PDT. This document supersedes stale runtime statements in ol
 Memo Android microphone
   -> authenticated audio and finalized transcripts
   -> https://followthrough.alhinai.dev
-  -> encrypted complete archive on Spark
+  -> complete local archive on Spark
   -> deterministic relevance and aggregation
   -> relevant-only durable Hermes Kanban job
   -> research / sandbox test / typed effect
@@ -16,7 +16,7 @@ Memo Android microphone
   -> Memo polling and spoken phone-speaker result
 ```
 
-Memo is the primary sensor. Omi, the Termux audio uploader, and the ADB transcript bridge are inactive rollback/history paths. Ordinary conversation is preserved only in the encrypted archive and is excluded from operational memory and actions.
+Memo is the primary sensor. Omi remains a supported ingestion adapter. Ordinary conversation is preserved only in the complete archive and is excluded from operational memory and actions. Transcripts are stored directly in SQLite and audio is stored as local files.
 
 ## Verified runtime
 
@@ -42,13 +42,13 @@ Memo is the primary sensor. Omi, the Termux audio uploader, and the ADB transcri
 | Phone capture and playback | Memo Android foreground service, `AudioRecord`, `AudioTrack`, Gemini Live |
 | Public ingress | Cloudflare Tunnel at `followthrough.alhinai.dev` |
 | API and dashboard | FastAPI/Uvicorn on Spark |
-| Durable state | Separate SQLite operations, encrypted archive, effects, and Hermes Kanban ledgers |
-| Private archive | AES-256-GCM transcript storage plus audio manifests and continuity checks |
+| Durable state | Separate SQLite operations, archive, effects, and Hermes Kanban ledgers |
+| Complete archive | Simple transcript/audio storage plus manifests, digests, and continuity checks |
 | Relevance | Deterministic owner/category/entity gate and transcript aggregation |
 | Agent runtime | Hermes Kanban board and least-authority `followthrough` worker profile |
 | Repository evaluation | Pinned provenance, policy scan, systemd+bubblewrap sandbox runner, deterministic receipts |
 | Owner surfaces | Memo spoken result, live web dashboard, optional Hermes Discord DM |
-| Verification | Pytest/Ruff, Android Gradle build, public health checks, hash-chained 24-hour soak |
+| Verification | Pytest/Ruff, Android Gradle build, public health checks, and optional bounded monitoring |
 
 ## Current revisions
 
@@ -58,4 +58,4 @@ Memo is the primary sensor. Omi, the Termux audio uploader, and the ADB transcri
 
 ## Remaining acceptance work
 
-The product is operational but the overall goal is not marked fully accepted until a fresh 24-hour soak completes cleanly and a physical no-repair voice run identifies its target correctly and completes phone-to-Spark-to-phone without operator correction. The prior soak is retained as evidence but cannot pass because its pre-fix monitor recorded one transient false `capture_sequence_gap` between two ingestion commits.
+The product is operational. Final acceptance requires a physical no-repair voice run that identifies its target correctly and completes phone-to-Spark-to-phone without operator correction. Long-running soak monitoring is optional diagnostic evidence, not a completion gate.

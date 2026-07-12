@@ -151,7 +151,7 @@ def create_archive(path: Path, audio_path: Path, *, gaps: bool = False) -> None:
         "INSERT INTO archive_events VALUES(?,?,?,?,?,?)",
         ("archive-1", "event-1", 1, "repository", canonical_json(metadata), "run-1"),
     )
-    audio_path.write_bytes(b"encrypted-audio")
+    audio_path.write_bytes(b"stored-audio")
     database.execute("INSERT INTO audio_chunks VALUES(?,?,?)", ("archive-1", 0, str(audio_path)))
     if gaps:
         database.execute("INSERT INTO audio_chunks VALUES(?,?,?)", ("archive-1", 2, str(audio_path)))

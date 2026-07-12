@@ -33,7 +33,7 @@ def operational_entity(text: str, category: str) -> str:
     Repository/tool research normally needs only a URL or named entity. Tasks,
     events, contacts, and goals require a bounded actionable clause; keeping
     that clause is intentional operational memory, while the complete source
-    transcript remains encrypted in the archive.
+    transcript remains in the complete archive.
     """
 
     named = entity(text)

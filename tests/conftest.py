@@ -16,7 +16,6 @@ def configured_settings(tmp_path: Path) -> tuple[Settings, str, str]:
     device_token = "device-test-token-01234567890123"
     (secrets_dir / "dashboard.token").write_text(dashboard_token)
     (devices / "phone.token").write_text(device_token)
-    (secrets_dir / "archive.key").write_bytes(bytes(range(32)))
     settings = Settings(
         db_path=tmp_path / "followthrough.db",
         archive_db_path=tmp_path / "archive" / "archive.db",
@@ -26,9 +25,7 @@ def configured_settings(tmp_path: Path) -> tuple[Settings, str, str]:
         secrets_dir=secrets_dir,
         dashboard_token_file=secrets_dir / "dashboard.token",
         device_tokens_dir=devices,
-        archive_key_file=secrets_dir / "archive.key",
         require_auth=True,
-        encrypt_archive=True,
         public_url="https://example.test",
         kanban_enabled=False,
     )

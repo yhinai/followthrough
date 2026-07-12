@@ -1,6 +1,6 @@
 # Followthrough
 
-Followthrough is an always-on personal ambient operator. Authenticated Memo Android sensors capture continuously, Spark preserves the complete encrypted archive, deterministic relevance promotes only useful speech, and a least-authority Hermes worker researches or proposes typed actions with durable receipts. The channel is bidirectional: Memo receives a durable job ID, resumes polling after an app restart, and speaks the sanitized Hermes result through the phone's built-in loudspeaker.
+Followthrough is an always-on personal ambient operator. Authenticated Memo Android sensors capture continuously, Spark preserves the complete archive with a simple local storage path, deterministic relevance promotes only useful speech, and a least-authority Hermes worker researches or proposes typed actions with durable receipts. The channel is bidirectional: Memo receives a durable job ID, resumes polling after an app restart, and speaks the Hermes result through the phone's built-in loudspeaker.
 
 This is a fresh event-day implementation. The earlier Ambient Operator prototype is not imported into this repository. Existing Hermes installation, standard scaffolding, and Cloudflare infrastructure are runtime scaffolding; the product code starts here.
 
@@ -13,7 +13,7 @@ cp .env.example .env
 .venv/bin/uvicorn followthrough.app:app --host 127.0.0.1 --port 18765
 ```
 
-Open `/` and enter the owner dashboard token, or use the Memo Android sensor. Every captured transcript and audio delivery is archived with AES-256-GCM; ordinary chatter remains archive-only and never enters Hermes memory or an action queue. Reversible private actions can run automatically, while external/high-risk writes remain policy- and approval-gated.
+Open `/` and enter the owner dashboard token, or use the Memo Android sensor. Every captured transcript and audio delivery is stored as plain files and SQLite rows in the local archive; ordinary chatter remains archive-only and never enters Hermes memory or an action queue. Reversible private actions can run automatically, while external/high-risk writes remain policy- and approval-gated.
 
 The fast path is local and deterministic: authentication, archive, relevance, repository acquisition/scanning/sandboxing, emergency controls, typed receipts, backup, and soak monitoring use no LLM call. Hermes runs only after a relevant signal crosses the gate. The live profile uses `gpt-5.6-luna` at low reasoning; routine global cron and delegation are routed away from Codex.
 

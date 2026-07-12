@@ -95,7 +95,7 @@ def test_official_omi_raw_pcm_audio_preserves_identical_chunks_without_delivery_
     archived = app.state.archive_store.by_event("omi:audio:uid-1:audio-delivery-1")
     chunk = app.state.archive_store.audio_chunk(archived["id"], 0)
     assert chunk is not None
-    assert pcm not in __import__("pathlib").Path(chunk["path"]).read_bytes()
+    assert __import__("pathlib").Path(chunk["path"]).read_bytes() == pcm
     metadata = json.loads(archived["metadata_json"])
     assert metadata["idempotency_source"] == "explicit"
     assert metadata["capture_stream_id"].startswith("omi:uid-1:")

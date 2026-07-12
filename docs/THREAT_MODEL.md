@@ -33,7 +33,7 @@ Current transport is Memo Android, with Omi retained only as an inactive compati
 ## Mandatory controls
 
 - Independent device and dashboard credentials, constant-time comparison, rotation, and revocation.
-- AES-256-GCM encryption with unique nonces and authenticated metadata.
+- Local archive digests and authenticated device ingress.
 - Event and action idempotency keys with uniqueness constraints.
 - Append-only audit receipts for every state transition and external side effect.
 - Separate archive and operational stores; irrelevant content is never inserted into Hermes memory.

@@ -22,7 +22,7 @@ class Crew:
         self.store.update_run(run_id, status="running")
         self.store.add_step(run_id, "signal_triage", "completed", f"{classification.kind} ({classification.confidence:.2f})", {"kind": classification.kind, "reason": classification.reason})
         plan, usage = manager_plan(text, {"roles": self.store.roles(), "metrics": self.store.metrics()}, self.settings.hermes_bin, self.settings.hermes_timeout_seconds)
-        self.store.add_step(run_id, "hermes_manager", "completed", "encrypted transcript + remembered context", plan, latency_ms=usage.get("latency_ms", 0), estimated_cost_usd=usage.get("estimated_cost_usd", 0.0))
+        self.store.add_step(run_id, "hermes_manager", "completed", "archived transcript + remembered context", plan, latency_ms=usage.get("latency_ms", 0), estimated_cost_usd=usage.get("estimated_cost_usd", 0.0))
         research: dict[str, Any] = {}
         if classification.actionable:
             try:
@@ -31,7 +31,7 @@ class Crew:
             except Exception as exc:
                 research = {"configured": True, "error": str(exc)}
                 self.store.add_step(run_id, "linkup_researcher", "failed", "entity research request", research)
-                self.store.add_eval(run_id, "[encrypted archive]", "cited research result", str(exc))
+                self.store.add_eval(run_id, "[complete archive]", "cited research result", str(exc))
         brief = self._brief(text, classification, plan, research)
         self.store.add_step(run_id, "opportunity_scorer", "completed", "derived research + remembered context", brief)
         policy = plan.get("policy", "draft_for_approval")
@@ -42,13 +42,13 @@ class Crew:
         try:
             audio_path = elevenlabs(brief["spoken_brief"], self.settings.elevenlabs_api_key, self.settings.elevenlabs_voice_id, self.settings.reports_dir.parent / "audio")
         except Exception as exc:
-            self.store.add_eval(run_id, "[encrypted archive]", "voice completion when configured", str(exc))
+            self.store.add_eval(run_id, "[complete archive]", "voice completion when configured", str(exc))
         if audio_path:
             self.store.add_step(run_id, "briefing", "completed", brief["spoken_brief"], {"audio": str(audio_path)})
         report_path = self.settings.reports_dir / f"{run_id}.md"
         report_path.write_text(
             "# Followthrough report\n\n"
-            f"**Run receipt:** `{run_id}` (source transcript retained only in the encrypted archive)\n\n"
+            f"**Run receipt:** `{run_id}` (source transcript retained only in the complete archive)\n\n"
             f"**Recommendation:** {brief['recommendation']}\n\n"
             f"**Research:** {brief['research']}\n\n"
             f"**Next action:** {brief['next_action']}\n\n"
