@@ -154,7 +154,30 @@ function renderDesktop(doctor, actions) {
 }
 
 const AGENT_LIVE = new Set(["starting", "pending", "running"]);
-const AGENT_MAX_STEPS = 30;
+const AGENT_MAX_STEPS = 12;
+
+function formatAgentAnswer(value) {
+  const lines = escapeHtml(String(value).slice(0, 900))
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const html = [];
+  let bullets = [];
+  const flush = () => {
+    if (bullets.length) { html.push(`<ul>${bullets.join("")}</ul>`); bullets = []; }
+  };
+  for (const line of lines) {
+    if (/^[-*\u2022\u00b7]\s+/.test(line)) {
+      bullets.push(`<li>${line.replace(/^[-*\u2022\u00b7]\s+/, "")}</li>`);
+    } else {
+      flush();
+      html.push(`<p>${line}</p>`);
+    }
+  }
+  flush();
+  return html.join("");
+}
 
 function agentActionText(session) {
   const raw = String(session.current_action || "");
@@ -206,12 +229,13 @@ function renderAgent(sessions) {
   const answer = $("#agentAnswer");
   if (session.state === "completed" && session.latest_answer) {
     answer.hidden = false;
-    setHTML("#agentAnswer", `<small>Spoken back to the phone</small><p>${escapeHtml(session.latest_answer).slice(0, 700)}</p>`);
+    setHTML("#agentAnswer", `<small>Returned to the phone</small>${formatAgentAnswer(session.latest_answer)}`);
   } else {
     answer.hidden = true;
   }
 
-  setHTML("#agentSessions", list.slice(0, 5).map((item) => `
+  const history = list.filter((item) => item.id !== session.id).slice(0, 3);
+  setHTML("#agentSessions", history.map((item) => `
     <li class="agent-session ${escapeHtml(item.state)}">
       <span class="agent-dot"></span>
       <div><strong>${escapeHtml(String(item.task || "web task").slice(0, 70))}</strong>

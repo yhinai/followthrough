@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     h_api_base: str = "https://agp.eu.hcompany.ai/api/v2"
     h_agent: str = "h/web-surfer-flash"
     h_poll_seconds: float = 1.0
-    h_max_steps: int = 30
+    h_max_steps: int = 12
     h_max_time_seconds: int = 300
     orgo_api_key: str = Field("", validation_alias="ORGO_API_KEY")
     orgo_default_computer_id: str = Field("", validation_alias="ORGO_DEFAULT_COMPUTER_ID")

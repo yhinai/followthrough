@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f4f5ef">
   <title>Followthrough · Ambient operator</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-6">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260712-7">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -48,7 +48,7 @@
         <div><p class="kicker">H Company computer-use agent</p><h2 id="agentTitle">What the agent is doing</h2></div>
         <span id="agentState" class="agent-state idle"><i></i>Idle</span>
       </div>
-      <div id="agentCurrent" class="agent-current empty">
+      <div class="agent-grid"><div class="agent-primary"><div id="agentCurrent" class="agent-current empty">
         <div class="agent-icon">H</div>
         <div class="agent-copy">
           <strong id="agentTask">No web task yet</strong>
@@ -61,8 +61,8 @@
           <div class="agent-progress"><i id="agentBar"></i></div>
         </div>
       </div>
-      <div id="agentAnswer" class="agent-answer" hidden></div>
-      <ol id="agentSessions" class="agent-sessions" aria-label="Recent agent sessions"></ol>
+      <div id="agentAnswer" class="agent-answer" hidden></div></div>
+      <aside class="agent-history"><small>Recent runs</small><ol id="agentSessions" class="agent-sessions" aria-label="Recent agent sessions"></ol><p>Runs asynchronously. Continue your day; the result returns to your phone.</p></aside></div>
     </section>
 
     <section class="panel desktop-panel" aria-labelledby="desktopTitle">
@@ -125,6 +125,6 @@
   </main>
 
   <footer><span>Followthrough</span><span>Hermes · NVIDIA Spark · Cloudflare edge</span><span>Built for conversations worth continuing.</span></footer>
-  <script src="/static/app.js?v=20260712-6"></script>
+  <script src="/static/app.js?v=20260712-7"></script>
 </body>
 </html>
